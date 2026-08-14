@@ -6,12 +6,18 @@
  * counter.php, so polling it records nothing and cannot pollute your stats.
  */
 
-$cfg = require __DIR__ . '/config.php';
-date_default_timezone_set($cfg['timezone']);
-
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, max-age=0');
 header('X-Robots-Tag: noindex');
+
+try {
+    $cfg = require __DIR__ . '/config.php';
+} catch (Throwable $e) {
+    http_response_code(503);
+    echo json_encode(['ok' => false]);
+    exit;
+}
+date_default_timezone_set($cfg['timezone']);
 
 $ranges   = ['7' => 1, '30' => 1, '90' => 1, '365' => 1, 'all' => 1];
 $range    = isset($_GET['range']) && isset($ranges[$_GET['range']]) ? (string) $_GET['range'] : '30';

@@ -12,7 +12,17 @@
 
 require_once __DIR__ . '/counter.php';
 
-$cfg = require __DIR__ . '/config.php';
+try {
+    $cfg = require __DIR__ . '/config.php';
+} catch (Throwable $e) {
+    http_response_code(503);
+    echo '<!doctype html><meta charset="utf-8"><title>Not set up yet</title>'
+       . '<body style="font:16px system-ui;padding:2rem;max-width:40rem">'
+       . '<h1>Not set up yet</h1><p>config.php has not been created. '
+       . '<a href="install.php">Run the setup wizard</a> to create it, or copy '
+       . 'config.example.php to config.php yourself.</p>';
+    exit;
+}
 date_default_timezone_set($cfg['timezone']);
 
 try {
