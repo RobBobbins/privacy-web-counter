@@ -1,15 +1,30 @@
 # Privacy Web Counter
 
-A first-party, server-side traffic counter. No cookies, no third-party domain, no IP
-addresses stored — so there is nothing for uBlock Origin, Brave Shields, Safari ITP or
-Firefox ETP to block. Data lives in one SQLite file on your own server. One small
-optional inline script recovers referrers your browser's `Referer` header would
-otherwise lose — see [Referrer recovery](#referrer-recovery--campaign-tracking) for
-exactly what it does, and how to turn it off for a tracker with zero JavaScript.
+Paid analytics adds up fast, and half of what it's supposed to show you is already gone
+by the time it loads — uBlock Origin, Brave Shields, Safari ITP, Firefox ETP and every
+privacy-focused browser block third-party analytics scripts before they fire, so a
+growing share of real visits never show up at all. This is the alternative: it counts
+server-side, on your own server, and shows just the basics — views, visitors,
+referrers, the shape of a day — as unintrusively as a counter can be.
 
-Free to use under the [MIT license](LICENSE). The dashboard shows a small "Powered by
-w3bguru.com" credit by default — you're welcome to leave it, and free to turn it off in
-setup if you'd rather not.
+No cookies, no third-party domain, no IP addresses stored. Data lives in one SQLite file
+you control, on the same server as the site itself. One small optional inline script
+recovers referrers your browser's `Referer` header would otherwise lose — see
+[Referrer recovery](#referrer-recovery--campaign-tracking) for exactly what it does, and
+how to turn it off for a tracker with zero JavaScript.
+
+Free to use under the [MIT license](LICENSE). The dashboard shows a small "LISTEN TO:
+PGNIP.ca comedy podcast" credit by default — you're welcome to leave it, and free to turn
+it off in setup if you'd rather not.
+
+## What it shows
+
+- Page views, unique visitors, pages visited, and today vs. yesterday change
+- A views-per-day chart and an hour-of-day × day-of-week activity heatmap
+- Top pages, referrers, campaign sources (UTM), browsers, OS, device type, countries
+- A live "Happening now" panel plus a detailed recent-visitors log
+- Nine date ranges: last 12 hours, today, yesterday, 7/30/90/365 days, all time
+- A light/dark theme toggle — remembers your choice, otherwise follows your system setting
 
 ## Pick a folder name
 
@@ -231,7 +246,10 @@ Set these with `install.php`, or by editing `config.php` directly:
 | `count_dashboard` | `true` | Count visits to the dashboard itself as a normal hit. |
 | `live_interval` | `15` | Seconds between live dashboard refreshes. `0` disables live updating. |
 | `live_feed` | `true` | Show the public "Happening now" recent-views feed. |
-| `show_recent_log` | `true` | Show the detailed 50-row "Recent visitors" table. |
+| `live_feed_limit` | `10` | Rows shown in the "Happening now" feed. |
+| `show_recent_log` | `true` | Show the detailed "Recent visitors" table. |
+| `recent_log_limit` | `50` | Rows shown in the "Recent visitors" table. |
 | `show_campaigns` | `true` | Show the "Campaign sources" table when UTM data exists. |
 | `own_hosts` | `example.com, www.example.com` | Hosts treated as internal navigation, not referrers. |
-| `powered_by` | `true` | Show the "Powered by w3bguru.com" credit. Optional, no strings attached. |
+| `powered_by` | `true` | Show the "LISTEN TO: PGNIP.ca comedy podcast" credit. Optional. |
+| `show_github` | `true` | Show a link to this project's GitHub repo in the footer. |

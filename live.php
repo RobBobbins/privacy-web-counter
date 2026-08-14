@@ -19,7 +19,7 @@ try {
 }
 date_default_timezone_set($cfg['timezone']);
 
-$ranges   = ['7' => 1, '30' => 1, '90' => 1, '365' => 1, 'all' => 1];
+$ranges   = ['12h' => 1, 'today' => 1, 'yesterday' => 1, '7' => 1, '30' => 1, '90' => 1, '365' => 1, 'all' => 1];
 $range    = isset($_GET['range']) && isset($ranges[$_GET['range']]) ? (string) $_GET['range'] : '30';
 $showBots = !empty($_GET['bots']);
 
@@ -28,13 +28,32 @@ try {
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->exec('PRAGMA busy_timeout = 3000');
 
-    $bot    = $showBots ? '1=1' : 'is_bot = 0';
-    $where  = $bot;
-    $params = [];
-    if ($range !== 'all') {
-        $where   .= ' AND day >= ?';
-        $params[] = date('Y-m-d', strtotime('-' . ((int) $range - 1) . ' days'));
+    $bot = $showBots ? '1=1' : 'is_bot = 0';
+
+    $dateWhere  = '1=1';
+    $dateParams = [];
+    switch ($range) {
+        case '12h':
+            $dateWhere    = 'ts >= ?';
+            $dateParams[] = time() - 12 * 3600;
+            break;
+        case 'today':
+            $dateWhere    = 'day = ?';
+            $dateParams[] = date('Y-m-d');
+            break;
+        case 'yesterday':
+            $dateWhere    = 'day = ?';
+            $dateParams[] = date('Y-m-d', strtotime('-1 day'));
+            break;
+        case 'all':
+            break;
+        default:
+            $dateWhere    = 'day >= ?';
+            $dateParams[] = date('Y-m-d', strtotime('-' . ((int) $range - 1) . ' days'));
     }
+
+    $where  = "$bot AND $dateWhere";
+    $params = $dateParams;
 
     $one = function ($sql, $p = []) use ($db) {
         $s = $db->prepare($sql);
@@ -61,9 +80,10 @@ try {
     ];
 
     if (!empty($cfg['live_feed'])) {
+        $liveFeedLimit = isset($cfg['live_feed_limit']) ? (int) $cfg['live_feed_limit'] : 10;
         $s = $db->prepare(
             "SELECT ts, path, browser, device, country, ref_host, is_bot, js_status
-             FROM hits WHERE $bot ORDER BY id DESC LIMIT 10"
+             FROM hits WHERE $bot ORDER BY id DESC LIMIT $liveFeedLimit"
         );
         $s->execute();
         foreach ($s->fetchAll(PDO::FETCH_ASSOC) as $r) {

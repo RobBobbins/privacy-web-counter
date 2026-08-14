@@ -48,6 +48,8 @@ $excludeIps   = $isPost ? $str('exclude_ips') : '';
 $retention    = $isPost ? $str('retention_days', '0') : '0';
 $backupDays   = $isPost ? $str('backup_days', '14') : '14';
 $liveInterval = $isPost ? $str('live_interval', '15') : '15';
+$recentLogLimit = $isPost ? $str('recent_log_limit', '50') : '50';
+$liveFeedLimit  = $isPost ? $str('live_feed_limit', '10') : '10';
 $salt         = $isPost ? $str('salt') : bin2hex(random_bytes(24));
 
 $recordBots     = $isPost ? !empty($_POST['record_bots'])     : true;
@@ -57,6 +59,7 @@ $liveFeed       = $isPost ? !empty($_POST['live_feed'])       : true;
 $showRecentLog  = $isPost ? !empty($_POST['show_recent_log']) : true;
 $showCampaigns  = $isPost ? !empty($_POST['show_campaigns'])  : true;
 $poweredBy      = $isPost ? !empty($_POST['powered_by'])      : true;
+$showGithub     = $isPost ? !empty($_POST['show_github'])     : true;
 
 if ($isPost) {
     if ($siteName === '') {
@@ -76,6 +79,12 @@ if ($isPost) {
     }
     if (!ctype_digit($liveInterval)) {
         $errors[] = 'Live interval must be a whole number.';
+    }
+    if (!ctype_digit($recentLogLimit) || (int) $recentLogLimit < 1) {
+        $errors[] = 'Recent visitors row count must be a whole number of 1 or more.';
+    }
+    if (!ctype_digit($liveFeedLimit) || (int) $liveFeedLimit < 1) {
+        $errors[] = 'Live feed row count must be a whole number of 1 or more.';
     }
 
     $ownHostsArr = array_values(array_filter(array_map('trim', explode(',', $ownHosts))));
@@ -108,9 +117,12 @@ if ($isPost) {
         $lines[] = "    'live_interval' => " . (int) $liveInterval . ',';
         $lines[] = "    'live_feed' => " . var_export($liveFeed, true) . ',';
         $lines[] = "    'show_recent_log' => " . var_export($showRecentLog, true) . ',';
+        $lines[] = "    'recent_log_limit' => " . (int) $recentLogLimit . ',';
+        $lines[] = "    'live_feed_limit' => " . (int) $liveFeedLimit . ',';
         $lines[] = "    'show_campaigns' => " . var_export($showCampaigns, true) . ',';
         $lines[] = "    'own_hosts' => " . var_export($ownHostsArr, true) . ',';
         $lines[] = "    'powered_by' => " . var_export($poweredBy, true) . ',';
+        $lines[] = "    'show_github' => " . var_export($showGithub, true) . ',';
         $lines[] = '];';
         $lines[] = '';
         $generatedPhp = implode("\n", $lines);
@@ -135,14 +147,26 @@ $tzList = DateTimeZone::listIdentifiers();
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Set up — Privacy Web Counter</title>
+<script>
+try {
+  var w3bTheme = localStorage.getItem('w3b_theme');
+  if (w3bTheme === 'light' || w3bTheme === 'dark') document.documentElement.setAttribute('data-theme', w3bTheme);
+} catch (e) {}
+</script>
 <style>
 :root{
-  --bg:#f7f7f8; --card:#fff; --ink:#16181d; --dim:#6b7280; --line:#e4e5e9;
+  --bg:#ffffff; --ink:#16181d; --dim:#6b7280; --line:#e4e5e9;
   --accent:#2563eb; --accent-soft:#dbe6ff; --err:#dc2626; --ok:#16a34a;
 }
 @media (prefers-color-scheme:dark){
-  :root{ --bg:#0e1014; --card:#171a20; --ink:#e8eaee; --dim:#9099a6; --line:#262a32;
-         --accent:#5b9cff; --accent-soft:#1e2b45; }
+  :root:not([data-theme="light"]){
+    --bg:#000000; --ink:#e8eaee; --dim:#9099a6; --line:#26262b;
+    --accent:#1d4ed8; --accent-soft:#101b3d; --err:#b91c1c;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --ink:#e8eaee; --dim:#9099a6; --line:#26262b;
+  --accent:#1d4ed8; --accent-soft:#101b3d; --err:#b91c1c;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
@@ -150,8 +174,12 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .wrap{max-width:640px;margin:0 auto;padding:2rem 1rem 4rem}
 h1{font-size:1.4rem;margin:0 0 .25rem}
 .sub{color:var(--dim);font-size:.88rem;margin:0 0 1.5rem}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1.25rem;margin-bottom:1.25rem}
-.card h2{font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin:0 0 1rem}
+.topbar{display:flex;align-items:center;gap:1rem;margin-bottom:1rem}
+.theme-toggle{background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:0;
+  padding:.3rem .6rem;font:inherit;font-size:.75rem;cursor:pointer;white-space:nowrap;margin-left:auto}
+.theme-toggle:hover{color:var(--ink);border-color:var(--accent)}
+.section{margin-bottom:2rem}
+.section h2{font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin:0 0 1rem}
 label{display:block;font-size:.85rem;font-weight:600;margin:0 0 .3rem}
 .help{color:var(--dim);font-size:.78rem;margin:.3rem 0 0}
 input[type=text],input[type=number],select,textarea{
@@ -162,15 +190,14 @@ textarea{min-height:4.5rem;resize:vertical}
 .field:last-child{margin-bottom:0}
 .check{display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.9rem}
 .check:last-child{margin-bottom:0}
-.check input{margin-top:.25rem}
+.check input{margin-top:.25rem;accent-color:var(--accent)}
 .check label{margin:0;font-weight:600}
 .check .help{margin-top:.15rem}
-button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.75rem 1.5rem;
-  font:inherit;font-weight:650;cursor:pointer}
-.errors{background:color-mix(in srgb, var(--err) 12%, transparent);border:1px solid var(--err);
-  border-radius:8px;padding:.9rem 1.1rem;margin-bottom:1.25rem;color:var(--err);font-size:.88rem}
+button[type=submit]{background:var(--accent);color:#fff;border:0;border-radius:0;padding:.4rem .8rem;
+  font:inherit;font-size:.82rem;font-weight:650;cursor:pointer}
+.errors{background:color-mix(in srgb, var(--err) 10%, transparent);border-radius:8px;
+  padding:.9rem 1.1rem;margin-bottom:1.5rem;color:var(--err);font-size:.88rem}
 .errors ul{margin:.3rem 0 0;padding-left:1.2rem}
-.success{border-color:var(--ok)}
 .success h1{color:var(--ok)}
 code{background:var(--accent-soft);padding:.1rem .35rem;border-radius:4px;font-size:.9em}
 textarea.code{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;min-height:16rem}
@@ -180,15 +207,19 @@ a{color:var(--accent)}
 </style>
 <div class="wrap">
 
+  <div class="topbar">
+    <button type="button" id="theme-toggle" class="theme-toggle">Dark mode</button>
+  </div>
+
 <?php if ($saved): ?>
 
-  <div class="card success">
+  <div class="section success">
     <h1>config.php written</h1>
     <p>Your settings are saved. This page will refuse to run again as long as
     <code>config.php</code> exists, so it's safe to leave <code>install.php</code>
     right where it is.</p>
   </div>
-  <div class="card">
+  <div class="section">
     <h2>Next steps</h2>
     <ol class="next">
       <li>Make sure <code>data/</code> is writable by PHP (<code>755</code>, or
@@ -206,6 +237,8 @@ a{color:var(--accent)}
 <?php else: ?>
 
   <h1>Set up Privacy Web Counter</h1>
+  <p class="sub">A self-hosted, first-party traffic counter — no cookies, no third-party domain, no IP
+  addresses stored. Source on <a href="https://github.com/RobBobbins/self-hosted-privacy-counter">GitHub</a>.</p>
   <p class="sub">This writes <code>config.php</code> for you. Nothing is tracked until you finish this.</p>
 
   <?php if ($writeError): ?>
@@ -225,7 +258,7 @@ a{color:var(--accent)}
   <?php endif; ?>
 
   <form method="post">
-    <div class="card">
+    <div class="section">
       <h2>Basics</h2>
       <div class="field">
         <label for="site_name">Site name</label>
@@ -253,7 +286,7 @@ a{color:var(--accent)}
       </div>
     </div>
 
-    <div class="card">
+    <div class="section">
       <h2>Privacy &amp; retention</h2>
       <div class="check">
         <input type="checkbox" id="record_bots" name="record_bots" value="1"<?= $recordBots ? ' checked' : '' ?>>
@@ -277,7 +310,7 @@ a{color:var(--accent)}
       </div>
     </div>
 
-    <div class="card">
+    <div class="section">
       <h2>JavaScript</h2>
       <div class="check">
         <input type="checkbox" id="js_beacon" name="js_beacon" value="1"<?= $jsBeacon ? ' checked' : '' ?>>
@@ -288,7 +321,7 @@ a{color:var(--accent)}
       </div>
     </div>
 
-    <div class="card">
+    <div class="section">
       <h2>Dashboard display</h2>
       <div class="check">
         <input type="checkbox" id="count_dashboard" name="count_dashboard" value="1"<?= $countDashboard ? ' checked' : '' ?>>
@@ -306,10 +339,20 @@ a{color:var(--accent)}
         <p class="help">Your dashboard is public, so this feed is too — no identities exposed, but
         anyone watching sees which pages are being read within seconds.</p></div>
       </div>
+      <div class="field">
+        <label for="live_feed_limit">Live feed rows</label>
+        <input type="number" id="live_feed_limit" name="live_feed_limit" min="1" value="<?= h($liveFeedLimit) ?>">
+        <p class="help">How many recent hits the "Happening now" feed shows at once.</p>
+      </div>
       <div class="check">
         <input type="checkbox" id="show_recent_log" name="show_recent_log" value="1"<?= $showRecentLog ? ' checked' : '' ?>>
         <div><label for="show_recent_log">Show the detailed "Recent visitors" table</label>
-        <p class="help">Last 50 hits, one row each, with browser/OS/device/referrer. More detailed than the live feed above.</p></div>
+        <p class="help">One row each, with browser/OS/device/referrer. More detailed than the live feed above.</p></div>
+      </div>
+      <div class="field">
+        <label for="recent_log_limit">Recent visitors rows</label>
+        <input type="number" id="recent_log_limit" name="recent_log_limit" min="1" value="<?= h($recentLogLimit) ?>">
+        <p class="help">How many hits the "Recent visitors" table shows.</p>
       </div>
       <div class="check">
         <input type="checkbox" id="show_campaigns" name="show_campaigns" value="1"<?= $showCampaigns ? ' checked' : '' ?>>
@@ -318,8 +361,13 @@ a{color:var(--accent)}
       </div>
       <div class="check">
         <input type="checkbox" id="powered_by" name="powered_by" value="1"<?= $poweredBy ? ' checked' : '' ?>>
-        <div><label for="powered_by">Show "Powered by w3bguru.com" credit</label>
+        <div><label for="powered_by">Show "LISTEN TO: PGNIP.ca comedy podcast" credit</label>
         <p class="help">Entirely optional — no strings attached either way.</p></div>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="show_github" name="show_github" value="1"<?= $showGithub ? ' checked' : '' ?>>
+        <div><label for="show_github">Show a link to this project's GitHub repo</label>
+        <p class="help">Appears at the bottom of the dashboard footer.</p></div>
       </div>
     </div>
 
@@ -329,4 +377,29 @@ a{color:var(--accent)}
 <?php endif; ?>
 
 </div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn  = document.getElementById('theme-toggle');
+  if (!btn) return;
+
+  function current() {
+    var explicit = root.getAttribute('data-theme');
+    if (explicit) return explicit;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function label(theme) {
+    btn.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+  }
+
+  label(current());
+  btn.addEventListener('click', function () {
+    var next = current() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('w3b_theme', next); } catch (e) {}
+    label(next);
+  });
+})();
+</script>
 </html>

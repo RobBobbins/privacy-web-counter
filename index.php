@@ -42,19 +42,50 @@ try {
 
 /* ---------- range selection ---------- */
 
-$ranges  = ['7' => 'Last 7 days', '30' => 'Last 30 days', '90' => 'Last 90 days', '365' => 'Last year', 'all' => 'All time'];
-$range   = isset($_GET['range']) && isset($ranges[$_GET['range']]) ? $_GET['range'] : '30';
+$ranges = [
+    '12h'       => 'Last 12 hours',
+    'today'     => 'Today',
+    'yesterday' => 'Yesterday',
+    '7'         => 'Last 7 days',
+    '30'        => 'Last 30 days',
+    '90'        => 'Last 90 days',
+    '365'       => 'Last year',
+    'all'       => 'All time',
+];
+$range    = isset($_GET['range']) && isset($ranges[$_GET['range']]) ? $_GET['range'] : '30';
 $showBots = !empty($_GET['bots']);
 
-$where  = $showBots ? '1=1' : 'is_bot = 0';
-$params = [];
-if ($range !== 'all') {
-    $from   = date('Y-m-d', strtotime('-' . ((int) $range - 1) . ' days'));
-    $where .= ' AND day >= ?';
-    $params[] = $from;
-} else {
-    $from = null;
+// $dateWhere/$dateParams hold just the date-range clause (no bot filter), so
+// they can be reused as-is for the bot count below, which needs the same
+// window but the opposite is_bot condition.
+$dateWhere  = '1=1';
+$dateParams = [];
+$from = null;
+switch ($range) {
+    case '12h':
+        $dateWhere    = 'ts >= ?';
+        $dateParams[] = time() - 12 * 3600;
+        break;
+    case 'today':
+        $from         = date('Y-m-d');
+        $dateWhere    = 'day = ?';
+        $dateParams[] = $from;
+        break;
+    case 'yesterday':
+        $from         = date('Y-m-d', strtotime('-1 day'));
+        $dateWhere    = 'day = ?';
+        $dateParams[] = $from;
+        break;
+    case 'all':
+        break;
+    default:
+        $from         = date('Y-m-d', strtotime('-' . ((int) $range - 1) . ' days'));
+        $dateWhere    = 'day >= ?';
+        $dateParams[] = $from;
 }
+
+$where  = ($showBots ? '1=1' : 'is_bot = 0') . ' AND ' . $dateWhere;
+$params = $dateParams;
 
 function q(PDO $db, $sql, array $p = [])
 {
@@ -86,12 +117,12 @@ $visitToday   = q1($db, "SELECT COUNT(*) FROM (SELECT 1 FROM hits WHERE $botFilt
 $viewsYest    = q1($db, "SELECT COUNT(*) FROM hits WHERE $botFilter AND day = ?", [$yesterday]);
 $allTimeViews = q1($db, "SELECT COUNT(*) FROM hits WHERE $botFilter");
 $firstDay     = q1($db, "SELECT MIN(day) FROM hits");
-$botCount     = q1($db, "SELECT COUNT(*) FROM hits WHERE is_bot = 1" . ($from ? " AND day >= ?" : ""), $from ? [$from] : []);
+$botCount     = q1($db, "SELECT COUNT(*) FROM hits WHERE is_bot = 1 AND $dateWhere", $dateParams);
 
 $delta = $viewsYest > 0 ? round((($viewsToday - $viewsYest) / $viewsYest) * 100) : null;
 
-// Live updating. The card is hidden until JavaScript reveals it, so a browser
-// with JS disabled sees a normal static page rather than a dead panel.
+// Live updating. The panel is hidden until JavaScript reveals it, so a browser
+// with JS disabled sees a normal static page rather than a dead section.
 $liveInterval = isset($cfg['live_interval']) ? (int) $cfg['live_interval'] : 15;
 $liveOn       = $liveInterval > 0;
 $online       = (int) q1($db, "SELECT COUNT(DISTINCT visitor) FROM hits WHERE $botFilter AND ts >= ?", [time() - 300]);
@@ -116,9 +147,10 @@ $jsNot     = q1($db, "SELECT COUNT(*) FROM hits WHERE $where AND js_status = ''"
 $recovered = q1($db, "SELECT COUNT(*) FROM hits WHERE $where AND js_status = 'recovered'", $params);
 
 $showRecentLog = !empty($cfg['show_recent_log']);
+$recentLogLimit = isset($cfg['recent_log_limit']) ? (int) $cfg['recent_log_limit'] : 50;
 $recentHits = $showRecentLog
     ? q($db, "SELECT ts, path, browser, os, device, ref_host, js_status, is_bot FROM hits WHERE $where
-              ORDER BY ts DESC LIMIT 50", $params)
+              ORDER BY ts DESC LIMIT $recentLogLimit", $params)
     : [];
 
 $showCampaigns = !empty($cfg['show_campaigns']);
@@ -138,19 +170,39 @@ $systems   = q($db, "SELECT os      AS k, COUNT(*) v FROM hits WHERE $where GROU
 $devices   = q($db, "SELECT device  AS k, COUNT(*) v FROM hits WHERE $where GROUP BY k ORDER BY v DESC", $params);
 $countries = q($db, "SELECT country AS k, COUNT(*) v FROM hits WHERE $where AND country != '' GROUP BY k ORDER BY v DESC LIMIT 15", $params);
 
-$hourly = array_fill(0, 24, 0);
-foreach (q($db, "SELECT hour, COUNT(*) v FROM hits WHERE $where GROUP BY hour", $params) as $r) {
-    $hourly[(int) $r['hour']] = (int) $r['v'];
+// Hour-of-day x day-of-week grid for the "Hourly activity" heatmap. Built from
+// day+hour pairs already stored per hit rather than a new SQL date function, so
+// it works the same on every SQLite build.
+$hourGrid = array_fill(0, 7, array_fill(0, 24, 0)); // rows: 0=Mon..6=Sun
+foreach (q($db, "SELECT day, hour, COUNT(*) v FROM hits WHERE $where GROUP BY day, hour", $params) as $r) {
+    $dow = (int) date('N', strtotime($r['day'])) - 1; // ISO: 1=Mon..7=Sun -> 0=Mon..6=Sun
+    $hourGrid[$dow][(int) $r['hour']] += (int) $r['v'];
+}
+$hourGridMax = 0;
+foreach ($hourGrid as $row) {
+    $hourGridMax = max($hourGridMax, max($row));
+}
+$hourGridMax = $hourGridMax ?: 1;
+
+/** Bucket a value into 6 heat levels (0 = lightest, 5 = darkest) relative to a max. */
+function heatBucket($v, $max)
+{
+    if ($max <= 0 || $v <= 0) {
+        return 0;
+    }
+    return min(5, (int) floor($v / $max * 6));
 }
 
 /* ---------- fill gaps in the daily series ---------- */
 
 $series = [];
-if ($range !== 'all') {
+if (in_array($range, ['7', '30', '90', '365'], true)) {
     for ($i = (int) $range - 1; $i >= 0; $i--) {
         $d = date('Y-m-d', strtotime("-$i days"));
         $series[$d] = ['v' => 0, 'u' => 0];
     }
+} elseif ($range === 'today' || $range === 'yesterday') {
+    $series[$from] = ['v' => 0, 'u' => 0];
 }
 foreach ($daily as $r) {
     $series[$r['day']] = ['v' => (int) $r['v'], 'u' => (int) $r['u']];
@@ -159,7 +211,6 @@ if ($range === 'all' && count($series) > 120) {
     $series = array_slice($series, -120, null, true);
 }
 $maxDay = $series ? max(array_column($series, 'v')) : 0;
-$maxHour = max($hourly) ?: 1;
 
 function url($overrides)
 {
@@ -194,14 +245,29 @@ function bars(array $rows, $labelKey, $valueKey, $total, $formatter = null)
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Stats — <?= h($cfg['site_name']) ?></title>
+<script>
+try {
+  var w3bTheme = localStorage.getItem('w3b_theme');
+  if (w3bTheme === 'light' || w3bTheme === 'dark') document.documentElement.setAttribute('data-theme', w3bTheme);
+} catch (e) {}
+</script>
 <style>
 :root{
-  --bg:#f7f7f8; --card:#fff; --ink:#16181d; --dim:#6b7280; --line:#e4e5e9;
-  --accent:#2563eb; --accent-soft:#dbe6ff; --bot:#a855f7;
+  --bg:#ffffff; --ink:#16181d; --dim:#6b7280; --line:#e4e5e9;
+  --accent:#2563eb; --accent-soft:#dbe6ff; --bot:#dc2626; --ok:#16a34a;
+  --heat-0:#eaf1fd; --heat-1:#cfe0fa; --heat-2:#a8c8f5; --heat-3:#7aa9ee; --heat-4:#4a86e0; --heat-5:#2563eb;
 }
 @media (prefers-color-scheme:dark){
-  :root{ --bg:#0e1014; --card:#171a20; --ink:#e8eaee; --dim:#9099a6; --line:#262a32;
-         --accent:#5b9cff; --accent-soft:#1e2b45; }
+  :root:not([data-theme="light"]){
+    --bg:#000000; --ink:#e8eaee; --dim:#9099a6; --line:#26262b;
+    --accent:#1d4ed8; --accent-soft:#101b3d; --bot:#b91c1c; --ok:#16a34a;
+    --heat-0:#0f1830; --heat-1:#132352; --heat-2:#1a2f74; --heat-3:#22409e; --heat-4:#2c52c4; --heat-5:#3866e8;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --ink:#e8eaee; --dim:#9099a6; --line:#26262b;
+  --accent:#1d4ed8; --accent-soft:#101b3d; --bot:#b91c1c; --ok:#16a34a;
+  --heat-0:#0f1830; --heat-1:#132352; --heat-2:#1a2f74; --heat-3:#22409e; --heat-4:#2c52c4; --heat-5:#3866e8;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
@@ -210,27 +276,32 @@ body{margin:0;background:var(--bg);color:var(--ink);
 h1{font-size:1.4rem;margin:0 0 .15rem}
 h2{font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin:0 0 .75rem}
 a{color:var(--accent)}
-.credit{color:var(--dim);font-size:.78rem;margin:0 0 .5rem}
+.credit{color:var(--dim);font-size:.78rem;margin:0}
 .credit a{color:inherit;text-decoration:underline}
 .sub{color:var(--dim);font-size:.85rem;margin:0 0 1.25rem}
-.tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1.25rem}
-.tabs a{display:inline-block;padding:.35rem .7rem;border:1px solid var(--line);border-radius:99px;
-  background:var(--card);text-decoration:none;color:var(--dim);font-size:.82rem}
-.tabs a.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.tabs a.bot.on{background:var(--bot);border-color:var(--bot)}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;margin-bottom:1.25rem}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.85rem 1rem}
+.topbar{display:flex;align-items:center;gap:1rem;margin-bottom:.5rem}
+.theme-toggle{background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:0;
+  padding:.3rem .6rem;font:inherit;font-size:.75rem;cursor:pointer;white-space:nowrap;margin-left:auto}
+.theme-toggle:hover{color:var(--ink);border-color:var(--accent)}
+.tabs{display:flex;flex-wrap:wrap;gap:1.1rem;margin-bottom:1.75rem}
+.tabs a{text-decoration:none;color:var(--dim);font-size:.85rem;padding-bottom:.25rem;
+  border-bottom:2px solid transparent}
+.tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--accent)}
+.tabs a.bot.on{border-bottom-color:var(--bot)}
+.section{margin-bottom:2rem}
+.kpis{display:flex;flex-wrap:wrap;gap:2rem;margin-bottom:2rem}
 .kpi b{display:block;font-size:1.7rem;font-weight:650;line-height:1.15;letter-spacing:-.02em}
 .kpi span{color:var(--dim);font-size:.78rem}
-.up{color:#16a34a}.down{color:#dc2626}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1.1rem;margin-bottom:1rem}
-.grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.up{color:var(--ok)}.down{color:var(--bot)}
+.grid{display:grid;gap:2rem;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 /* Each column is a full-height track; the <i> inside is the value. The track
    must have a real height or the percentage on <i> has nothing to resolve against. */
 .chart{display:flex;align-items:stretch;gap:2px;height:160px}
 .chart div{flex:1;min-width:2px;height:100%;background:var(--line);border-radius:2px 2px 0 0;position:relative}
 .chart div i{position:absolute;left:0;right:0;bottom:0;background:var(--accent);border-radius:2px 2px 0 0;display:block}
 .xaxis{display:flex;justify-content:space-between;color:var(--dim);font-size:.72rem;margin-top:.45rem}
+.heat-hourly{display:grid;grid-template-columns:repeat(24,1fr);gap:2px}
+.heat-hourly div{aspect-ratio:1;border-radius:2px}
 ul.bars{list-style:none;margin:0;padding:0}
 ul.bars li{position:relative;display:flex;justify-content:space-between;gap:1rem;
   padding:.4rem .55rem;border-radius:5px;font-size:.88rem;overflow:hidden}
@@ -238,8 +309,6 @@ ul.bars .fill{position:absolute;inset:0 auto 0 0;background:var(--accent-soft);b
 ul.bars .lab{position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 ul.bars .val{position:relative;white-space:nowrap;color:var(--dim);font-variant-numeric:tabular-nums}
 ul.bars .val em{font-style:normal;opacity:.65;font-size:.8em}
-.hours{display:flex;align-items:flex-end;gap:3px;height:80px}
-.hours div{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-height:1px}
 .empty{color:var(--dim);font-size:.88rem;margin:0}
 .log-wrap{overflow-x:auto}
 table.log{width:100%;border-collapse:collapse;font-size:.85rem}
@@ -272,9 +341,12 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
 </style>
 <div class="wrap">
 
-  <?php if (!empty($cfg['powered_by'])): ?>
-    <p class="credit">Powered by <a href="https://w3bguru.com" rel="noopener">w3bguru.com</a></p>
-  <?php endif; ?>
+  <div class="topbar">
+    <?php if (!empty($cfg['powered_by'])): ?>
+      <p class="credit">LISTEN TO: <a href="https://pgnip.ca" rel="noopener">PGNIP.ca</a> comedy podcast</p>
+    <?php endif; ?>
+    <button type="button" id="theme-toggle" class="theme-toggle">Dark mode</button>
+  </div>
 
   <h1><?= h($cfg['site_name']) ?> — traffic</h1>
   <p class="sub">
@@ -310,7 +382,7 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
     <div class="kpi"><b data-live="allTimeViews"><?= n($allTimeViews) ?></b><span>All-time views</span></div>
   </div>
 
-  <div class="card">
+  <div class="section">
     <h2>Views per day</h2>
     <?php if ($maxDay > 0): ?>
       <div class="chart">
@@ -331,15 +403,30 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
     <?php endif; ?>
   </div>
 
-  <div class="grid">
-    <div class="card">
+  <div class="section">
+    <h2>Hourly activity (<?= h($cfg['timezone']) ?>)</h2>
+    <?php if ($views > 0): ?>
+      <div class="heat-hourly">
+        <?php foreach ($hourGrid as $dow => $hours): foreach ($hours as $hr => $v): ?>
+          <div style="background:var(--heat-<?= heatBucket($v, $hourGridMax) ?>)"
+               title="<?= h(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][$dow]) ?> <?= $hr ?>:00 — <?= n($v) ?> views"></div>
+        <?php endforeach; endforeach; ?>
+      </div>
+      <div class="xaxis"><span>12am</span><span>12pm</span><span>11pm</span></div>
+    <?php else: ?>
+      <p class="empty">No views in this range yet.</p>
+    <?php endif; ?>
+  </div>
+
+  <div class="grid section">
+    <div>
       <h2>Top pages</h2>
       <?php bars($topPages, 'path', 'v', $views, function ($p) {
           return '<a href="' . h($p) . '">' . h($p) . '</a>';
       }); ?>
     </div>
 
-    <div class="card">
+    <div>
       <h2>Where visitors came from</h2>
       <?php
       $refRows = $topRefs;
@@ -352,7 +439,7 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
     </div>
 
     <?php if (!empty($cfg['js_beacon'])): ?>
-    <div class="card">
+    <div>
       <h2>JavaScript enabled</h2>
       <?php
       $jsStats = [];
@@ -371,7 +458,7 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
   </div>
 
   <?php if ($showRecentLog): ?>
-  <div class="card">
+  <div class="section">
     <h2>Recent visitors</h2>
     <?php if ($recentHits): ?>
     <div class="log-wrap">
@@ -400,34 +487,24 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
   <?php endif; ?>
 
   <?php if ($showCampaigns && $campaigns): ?>
-    <div class="card">
+    <div class="section">
       <h2>Campaign sources</h2>
       <?php bars($campaigns, 'label', 'v', $views); ?>
     </div>
   <?php endif; ?>
 
-  <div class="grid">
-    <div class="card"><h2>Browsers</h2><?php bars($browsers, 'k', 'v', $views); ?></div>
-    <div class="card"><h2>Operating systems</h2><?php bars($systems, 'k', 'v', $views); ?></div>
-    <div class="card"><h2>Device type</h2><?php bars($devices, 'k', 'v', $views); ?></div>
+  <div class="grid section">
+    <div><h2>Browsers</h2><?php bars($browsers, 'k', 'v', $views); ?></div>
+    <div><h2>Operating systems</h2><?php bars($systems, 'k', 'v', $views); ?></div>
+    <div><h2>Device type</h2><?php bars($devices, 'k', 'v', $views); ?></div>
   </div>
 
   <?php if ($countries): ?>
-    <div class="card"><h2>Countries</h2><?php bars($countries, 'k', 'v', $views); ?></div>
+    <div class="section"><h2>Countries</h2><?php bars($countries, 'k', 'v', $views); ?></div>
   <?php endif; ?>
 
-  <div class="card">
-    <h2>Busiest hours (<?= h($cfg['timezone']) ?>)</h2>
-    <div class="hours">
-      <?php foreach ($hourly as $hr => $v): ?>
-        <div title="<?= $hr ?>:00 — <?= n($v) ?> views" style="height:<?= round($v / $maxHour * 100, 2) ?>%"></div>
-      <?php endforeach; ?>
-    </div>
-    <div class="xaxis"><span>00:00</span><span>12:00</span><span>23:00</span></div>
-  </div>
-
   <?php if ($liveOn): ?>
-  <div class="card live" id="live" hidden>
+  <div class="live section" id="live" hidden>
     <h2>
       <span class="dot"></span>Happening now
       <span class="pulse" id="live-status">connecting…</span>
@@ -445,9 +522,37 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
     midnight and then discarded — it cannot be reversed or followed from one day to the next.
     <?php if (!$countries): ?><br>Country data is unavailable: your host is not passing a
     country header. Everything else works regardless.<?php endif; ?>
+    <?php if (!empty($cfg['show_github'])): ?>
+      <br><a href="https://github.com/RobBobbins/self-hosted-privacy-counter">Privacy Web Counter on GitHub</a>
+    <?php endif; ?>
   </footer>
 
 </div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn  = document.getElementById('theme-toggle');
+  if (!btn) return;
+
+  function current() {
+    var explicit = root.getAttribute('data-theme');
+    if (explicit) return explicit;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function label(theme) {
+    btn.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+  }
+
+  label(current());
+  btn.addEventListener('click', function () {
+    var next = current() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('w3b_theme', next); } catch (e) {}
+    label(next);
+  });
+})();
+</script>
 
 <?php if ($liveOn): ?>
 <script>

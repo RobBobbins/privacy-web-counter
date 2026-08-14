@@ -85,10 +85,16 @@ return [
     // if you'd rather not broadcast it.
     'live_feed' => true,
 
-    // Show the detailed "Recent visitors" table (last 50 hits, one row each,
-    // with browser/OS/device/referrer)? More revealing than the live feed
-    // above since it doesn't auto-hide anything — set to false to drop it.
+    // How many recent hits the "Happening now" live feed shows at once.
+    'live_feed_limit' => 10,
+
+    // Show the detailed "Recent visitors" table (one row each, with
+    // browser/OS/device/referrer)? More revealing than the live feed above
+    // since it doesn't auto-hide anything — set to false to drop it.
     'show_recent_log' => true,
+
+    // How many hits the "Recent visitors" table shows.
+    'recent_log_limit' => 50,
 
     // Show the "Campaign sources" card when any hit carries utm_source? Only
     // relevant if you use UTM-tagged links; harmless either way if you don't.
@@ -98,7 +104,11 @@ return [
     // referrers (internal navigation).
     'own_hosts' => ['example.com', 'www.example.com'],
 
-    // Show a small "Powered by w3bguru.com" credit near the top of the dashboard.
-    // Entirely optional — set to false to remove it, no strings attached.
+    // Show a small "LISTEN TO: PGNIP.ca comedy podcast" credit near the top of
+    // the dashboard. Entirely optional — set to false to remove it.
     'powered_by' => true,
+
+    // Show a link to this project's GitHub repo at the bottom of the dashboard
+    // footer, below the "Visitors are counted..." line.
+    'show_github' => true,
 ];
