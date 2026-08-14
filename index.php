@@ -523,7 +523,7 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
     <?php if (!$countries): ?><br>Country data is unavailable: your host is not passing a
     country header. Everything else works regardless.<?php endif; ?>
     <?php if (!empty($cfg['show_github'])): ?>
-      <br><a href="https://github.com/RobBobbins/self-hosted-privacy-counter">Privacy Web Counter on GitHub</a>
+      <br><a href="https://github.com/RobBobbins/privacy-web-counter">Privacy Web Counter on GitHub</a>
     <?php endif; ?>
   </footer>
 

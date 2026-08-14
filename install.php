@@ -238,7 +238,7 @@ a{color:var(--accent)}
 
   <h1>Set up Privacy Web Counter</h1>
   <p class="sub">A self-hosted, first-party traffic counter — no cookies, no third-party domain, no IP
-  addresses stored. Source on <a href="https://github.com/RobBobbins/self-hosted-privacy-counter">GitHub</a>.</p>
+  addresses stored. Source on <a href="https://github.com/RobBobbins/privacy-web-counter">GitHub</a>.</p>
   <p class="sub">This writes <code>config.php</code> for you. Nothing is tracked until you finish this.</p>
 
   <?php if ($writeError): ?>
