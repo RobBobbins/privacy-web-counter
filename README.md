@@ -7,9 +7,17 @@ growing share of real visits never show up at all. This is the alternative: it c
 server-side, on your own server, and shows just the basics — views, visitors,
 referrers, the shape of a day — as unintrusively as a counter can be.
 
-No cookies, no third-party domain, no IP addresses stored. Data lives in one SQLite file
-you control, on the same server as the site itself. One small optional inline script
-recovers referrers your browser's `Referer` header would otherwise lose — see
+Those blockers work from lists of known third-party tracker domains and scripts —
+Google Analytics, Meta Pixel, most hosted "privacy-friendly" analytics too, since even
+those load a script from someone else's server. There's nothing here for a list like
+that to match: counting happens in PHP on your own server while the page itself is
+being built, before anything is sent to the browser. No separate script tag, no
+separate domain, no separate request — so there's nothing to block, not because it's
+hiding from anything, but because it was never a third party to begin with.
+
+No cookies, no IP addresses stored. Data lives in one SQLite file you control, on the
+same server as the site itself. One small optional inline script recovers referrers
+your browser's `Referer` header would otherwise lose — see
 [Referrer recovery](#referrer-recovery--campaign-tracking) for exactly what it does, and
 how to turn it off for a tracker with zero JavaScript.
 
