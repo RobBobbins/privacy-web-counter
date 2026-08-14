@@ -1,0 +1,13 @@
+# Block all web access to the counter database.
+# Without this, anyone could download stats.db directly.
+
+# Apache 2.4+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+
+# Apache 2.2 and older
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

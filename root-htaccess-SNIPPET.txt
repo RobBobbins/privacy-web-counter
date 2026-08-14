@@ -1,0 +1,55 @@
+# ===================================================================
+# PASTE EVERYTHING BELOW THIS LINE at the END of your web root's .htaccess
+#
+# Back up that file first. Do not replace it — add to it.
+#
+# Lines starting with # are ignored by Apache. Exactly ONE handler line
+# below should be active. If your pages break, put a # in front of the
+# active one and remove the # from a different one, then reload your site.
+#
+# Not sure which one your host needs? Upload the verify/phpcheck/ folder from
+# this repo — it has six pre-built test folders, one per handler spelling
+# below, so you can see which one actually works before touching your real
+# pages. See the README's "Checking it worked" section.
+# ===================================================================
+
+
+# --- Counter: make .html files run PHP -----------------------------
+
+# OPTION 1 - generic Apache mod_php (active by default — works on most
+# Apache shared hosting, including hosts with no cPanel)
+AddType application/x-httpd-php .html .htm
+
+# OPTION 2 - IONOS shared hosting. This is IONOS's own handler name — the "5"
+# is historical, it runs whatever PHP version the account is actually set to.
+# Verified working on IONOS (PHP 8.4.23, Apache, cgi-fcgi) after every other
+# option on this list was tried and failed on that same account.
+#AddType x-mapp-php5 .html .htm
+
+# OPTION 3 - cPanel / LiteSpeed, PHP 8.3
+#AddHandler application/x-httpd-ea-php83 .html .htm
+
+# OPTION 4 - cPanel / LiteSpeed, PHP 8.2
+#AddHandler application/x-httpd-ea-php82 .html .htm
+
+# OPTION 5 - cPanel / LiteSpeed, PHP 8.1
+#AddHandler application/x-httpd-ea-php81 .html .htm
+
+# OPTION 6 - some LiteSpeed / older cPanel accounts
+#AddHandler x-mapp-php7 .html .htm
+
+# OPTION 7 - SetHandler variant, worth trying if nothing else above works
+#<FilesMatch "\.html?$">
+#    SetHandler application/x-httpd-php
+#</FilesMatch>
+
+
+# --- Counter: block direct download of the database ----------------
+
+<FilesMatch "\.(db|db-wal|db-shm|sqlite)$">
+    Require all denied
+</FilesMatch>
+
+# ===================================================================
+# END OF PASTE
+# ===================================================================

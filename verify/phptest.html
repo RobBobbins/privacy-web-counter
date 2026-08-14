@@ -1,0 +1,44 @@
+<?php require_once $_SERVER['DOCUMENT_ROOT'] . '/YOUR-FOLDER-NAME/counter.php'; ?><!doctype html>
+<meta charset="utf-8">
+<title>Counter check</title>
+<body style="font:16px system-ui;padding:2rem;max-width:42rem">
+
+<h1>Counter check</h1>
+
+<p style="font-size:1.5rem">
+  Result: <b><?php echo 'PHP IS ON — and this visit was counted'; ?></b>
+</p>
+
+<hr>
+
+<h2>How to read this</h2>
+
+<p>Before using this file, replace <code>YOUR-FOLDER-NAME</code> above with
+wherever you installed this package (e.g. <code>counter</code>,
+<code>stats</code>).</p>
+
+<p><b>If the line above says "PHP IS ON"</b> — everything works. The handler is
+active in this folder and the counter recorded this visit. Open the dashboard
+(<code>index.php</code> in your install folder) and you should see 1 page view
+for this file.</p>
+
+<p><b>If it says just "Result:" with nothing after it</b> — PHP is not running
+in this folder. .html files are still being served as plain files. Upload the
+<code>phpcheck/</code> folder next to this file and open each
+<code>phpcheck/t1/</code> through <code>t7/</code> in turn — whichever one says
+"WORKS" tells you which handler line to use in
+<code>root-htaccess-SNIPPET.txt</code>.</p>
+
+<p><b>If you can see PHP code on this page</b> — the handler is pointed at the
+wrong PHP version. Check your host's PHP version selector (on cPanel this is
+called MultiPHP Manager) and change the handler line to match, or use the
+<code>phpcheck/</code> folder described above to find the right one directly.</p>
+
+<p><b>If you get a 500 error</b> — the server rejected something in the
+.htaccess. Restore your backup.</p>
+
+<p style="color:#777">Delete this file when you're done. (No need to delete
+<code>install.php</code> — it disables itself automatically once <code>config.php</code>
+exists.)</p>
+
+</body>

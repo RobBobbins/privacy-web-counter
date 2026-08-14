@@ -1,0 +1,237 @@
+# Privacy Web Counter
+
+A first-party, server-side traffic counter. No cookies, no third-party domain, no IP
+addresses stored — so there is nothing for uBlock Origin, Brave Shields, Safari ITP or
+Firefox ETP to block. Data lives in one SQLite file on your own server. One small
+optional inline script recovers referrers your browser's `Referer` header would
+otherwise lose — see [Referrer recovery](#referrer-recovery--campaign-tracking) for
+exactly what it does, and how to turn it off for a tracker with zero JavaScript.
+
+Free to use under the [MIT license](LICENSE). The dashboard shows a small "Powered by
+w3bguru.com" credit by default — you're welcome to leave it, and free to turn it off in
+setup if you'd rather not.
+
+## Pick a folder name
+
+This package can live at any path on your site — `counter`, `stats`, `analytics`,
+`tools/traffic`, whatever you like. Nothing here is hardcoded to a specific name: every
+file finds its own folder automatically, and the dashboard excludes its own pages from
+being counted based on wherever you actually put it.
+
+The **one place** the folder name has to be typed is the include line you add to your
+pages (step 3 below) — because that's how PHP finds the file in the first place. Rename
+the folder later and you only need to update that one line, everywhere it appears.
+
+The rest of this README uses `YOUR-FOLDER-NAME` as a placeholder. Replace it with
+whatever you actually chose.
+
+## Files
+
+| Local file | Goes on the host at |
+|---|---|
+| `config.php` | `/public_html/YOUR-FOLDER-NAME/config.php` |
+| *(`config.example.php` is a fallback template — see below)* | |
+| `lib.php` | `/public_html/YOUR-FOLDER-NAME/lib.php` |
+| `counter.php` | `/public_html/YOUR-FOLDER-NAME/counter.php` |
+| `referrer.php` | `/public_html/YOUR-FOLDER-NAME/referrer.php` |
+| `install.php` | `/public_html/YOUR-FOLDER-NAME/install.php` |
+| `index.php` | `/public_html/YOUR-FOLDER-NAME/index.php` |
+| `live.php` | `/public_html/YOUR-FOLDER-NAME/live.php` |
+| `data/.htaccess` | `/public_html/YOUR-FOLDER-NAME/data/.htaccess` |
+| `root-htaccess-SNIPPET.txt` | paste its contents into `/public_html/.htaccess` |
+
+`stats.db` is created automatically on the first counted page view. Do not upload one.
+
+Some hosts have no `public_html` folder at all — the FTP root **is** the web root. If
+that's yours, drop `YOUR-FOLDER-NAME` straight into the FTP root instead.
+
+## Install
+
+1. **Upload everything** to a folder of your choice in your web root, so you end up
+   with `/YOUR-FOLDER-NAME/` containing `config.example.php`, `lib.php`, `counter.php`,
+   `referrer.php`, `install.php`, `index.php`, `live.php` and a `data` folder holding
+   `.htaccess`.
+
+2. **Make `data` writable.** In your FTP client or file manager, set the permissions
+   of `/YOUR-FOLDER-NAME/data/` to `755`. If the counter records nothing later, try `777`.
+
+3. **Visit `https://yoursite.com/YOUR-FOLDER-NAME/install.php`** and fill in the form.
+   It writes `config.php` for you, including a freshly generated salt, and then refuses
+   to run again — safe to leave it in place indefinitely, no need to delete it.
+
+   Prefer to edit PHP by hand? Skip the installer: copy `config.example.php` to
+   `config.php` yourself and fill in the values — every setting is explained in its
+   comments. `install.php` simply won't offer its form once `config.php` exists either way.
+
+4. **Edit the `.htaccess` in your web root.** Open `root-htaccess-SNIPPET.txt`, copy
+   the contents, and **append** it to your web root's `.htaccess` (not the one in
+   `data/`). Do not overwrite that file — it probably has redirects and rewrite rules
+   already. Keep a backup copy of it first. Not sure which handler line your host
+   needs? See [Checking it worked](#checking-it-worked) below.
+
+5. **Add one line to the top of every page you want counted.** It must be the very
+   first thing in the file, before `<!doctype html>`, with nothing — not even a
+   blank line or a space — in front of it:
+
+   ```php
+   <?php require_once $_SERVER['DOCUMENT_ROOT'] . '/YOUR-FOLDER-NAME/counter.php'; ?><!doctype html>
+   ```
+
+6. **Visit your site**, then open `https://yoursite.com/YOUR-FOLDER-NAME/`.
+
+## Checking it worked
+
+- If pages render normally and the dashboard shows a view, you're done.
+- If your browser **downloads** the `.html` file instead of showing it, or you see
+  the raw `<?php ... ?>` text on the page, the `.htaccess` handler line is wrong for
+  your host. Upload the `verify/phpcheck/` folder from this repo — it has seven
+  pre-built test folders (`t1` through `t7`), one per handler spelling in
+  `root-htaccess-SNIPPET.txt`. Open each one; whichever says "WORKS" tells you which
+  line to uncomment. `verify/phptest.html` is a second, single-file check once you
+  think you've got the right one.
+- If pages render but the dashboard says "No data yet", the `data` folder isn't
+  writable. Go back to step 2.
+
+## Live updating
+
+The dashboard refreshes itself while you're looking at it. Every 15 seconds it fetches
+`live.php` — a read-only JSON endpoint — and rewrites the headline numbers in place,
+along with a **Happening now** panel showing how many people were on the site in the
+last five minutes and the most recent page views as they land.
+
+This is a *viewer* feature and it changes nothing about the tracking:
+
+- This script lives only on `index.php`, a page your visitors never load. It's separate
+  from the referrer-recovery script described below, which does run on visitor-facing pages.
+- `live.php` does not include `counter.php`, so polling it records nothing.
+- With JavaScript disabled the dashboard still renders completely — the numbers just
+  stop moving, and the Happening now panel stays hidden rather than sitting there dead.
+- Polling **stops entirely when the tab is in the background** and resumes when you come
+  back. A dashboard left open all day otherwise costs thousands of pointless queries.
+
+Settings in `config.php`:
+
+- `live_interval` — seconds between refreshes, default `15`. Set to `0` to turn live
+  updating off completely and go back to a plain static page.
+- `live_feed` — set to `false` to keep the numbers live but drop the recent-views list.
+  Worth considering: **your dashboard is public, so that feed is public too.** It exposes
+  no IP addresses or identities, but anyone watching can see which pages are being read
+  within seconds of it happening.
+
+## Referrer recovery & campaign tracking
+
+Some browsers strip the `Referer` header from the actual page request — a privacy
+setting, an app's in-app browser, an https-to-http hop — but still expose the same value
+to JavaScript as `document.referrer`. Without help, those visits just show up as "Direct."
+
+When `config['js_beacon']` is on (the default), `counter.php` buffers each page and
+appends one small inline script right before `</body>`:
+
+```html
+<script>(function(p,r,u){navigator.sendBeacon?navigator.sendBeacon(u,
+JSON.stringify({p:p,r:r})):(new Image()).src=u+'?p='+encodeURIComponent(p)
++'&r='+encodeURIComponent(r);})(location.pathname,document.referrer,'/YOUR-FOLDER-NAME/referrer.php');
+</script>
+```
+
+It runs on every counted page and always reports back — either a referrer value, or
+confirmation that there wasn't one. That second case matters: without it, "no referrer
+received" could mean either a genuinely direct visit, or a visitor whose JavaScript never
+ran at all. Always reporting turns silence into a real signal: it can only mean
+JavaScript was off or blocked.
+
+`referrer.php` receives that report and patches the matching row in `stats.db` — the most
+recent hit from the same visitor hash and page path, within 5 seconds. No cookie or new
+identifier is involved: it's the same daily-rotating `visitor` hash described in
+[Privacy design](#privacy-design), recomputed from the beacon's own IP and user agent. A
+request can therefore only ever touch a row that belongs to whoever sent it — there's no
+rate limiting because there's nothing for a stranger to abuse.
+
+On the dashboard, a **JavaScript enabled** card shows how many hits had the beacon report
+back versus not, plus how many referrers it actually recovered.
+
+`counter.php` also reads `utm_source`, `utm_medium` and `utm_campaign` off the page URL's
+query string, if present, and stores them alongside the hit — no JavaScript involved,
+this part is entirely server-side. When any hit in the selected range carries UTM data, a
+**Campaign sources** card appears on the dashboard.
+
+**Want zero JavaScript instead?** Set `js_beacon` to `false` in `config.php` (or uncheck
+it during setup). Core tracking, UTM capture and backups all keep working exactly the
+same — you just lose referrer recovery and the JS-status column, and "Direct" goes back
+to meaning "no `Referer` header arrived," full stop.
+
+## Automatic backups
+
+If `backup_days` is set above `0` (default `14`), the first hit after midnight writes a
+complete snapshot of `stats.db` to `data/backups/stats-YYYY-MM-DD.db`, using SQLite's
+`VACUUM INTO` — safe to run while the live database is being written to. Snapshots older
+than `backup_days` are deleted automatically. Set `backup_days` to `0` to turn this off
+entirely. `data/.htaccess` already blocks web access to everything in `data/`, backups
+included.
+
+## Known tradeoffs of this approach
+
+- **Every `.html` page now goes through the PHP interpreter.** Slightly slower
+  than serving a static file, and some hosts stop applying browser-cache headers
+  to PHP-handled files. On a small site the difference is not noticeable.
+- **Any page containing a literal `<?` sequence may break.** The most common
+  culprit is an XML declaration, `<?xml version="1.0"?>`, inside an inline SVG.
+  PHP will try to interpret it. Search your pages for `<?xml` before switching
+  the handler on; SVGs work fine without that declaration, so delete it if found.
+- **You must edit every page you want counted.** Pages without the include line
+  are invisible to the counter.
+- **If `js_beacon` is on, every counted page makes one small extra request** via
+  `navigator.sendBeacon` (or an image request as a fallback) to `referrer.php`. It
+  fires on every page view, not just direct ones — see
+  [Referrer recovery](#referrer-recovery--campaign-tracking) — since that's the only
+  way to distinguish a confirmed-direct visit from one where JavaScript never ran.
+  Turn `js_beacon` off if you'd rather the tracker made zero requests, full stop.
+- **The dashboard is public.** Anyone who finds `/YOUR-FOLDER-NAME/` can read your
+  traffic numbers. It carries `noindex` so search engines skip it, but that is a
+  request, not a lock. If `count_dashboard` is on (the default), visits to the
+  dashboard itself appear in the Top pages list like any other page.
+
+## If `.html` parsing won't work on your host
+
+Rename the pages to `.php` instead (`index.html` → `index.php`) and add these
+redirects to your web root's `.htaccess` so old links keep working:
+
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.+)\.html$ /$1.php [R=301,L]
+```
+
+No handler directive is needed in that case — `.php` files already run PHP.
+
+## Privacy design
+
+The only per-visitor value stored is `visitor`: the first 20 characters of
+`sha256(secret salt + today's date + IP + user agent)`. Because the date is part of
+the input, the same person produces a different value tomorrow — the hash cannot be
+followed across days, and it cannot be reversed to recover an IP. Raw IP addresses
+are never written to disk. This is the same technique Plausible and Fathom use, and
+it is what makes the counter GDPR/PIPEDA-friendly without a cookie banner.
+
+## Every setting
+
+Set these with `install.php`, or by editing `config.php` directly:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `timezone` | `UTC` | Timezone used for days/hours throughout the dashboard. |
+| `salt` | *(random)* | Set once, never change — changing it resets unique-visitor counting. |
+| `exclude_paths` | robots.txt, favicon.ico, sitemap.xml | Paths never counted. This folder's own pages are excluded automatically. |
+| `exclude_ips` | *(none)* | IPs never counted — add your own from ifconfig.me. |
+| `record_bots` | `true` | Store bot hits (hidden from the dashboard by default) instead of dropping them. |
+| `retention_days` | `0` | Auto-delete hits older than this many days. `0` keeps everything. |
+| `backup_days` | `14` | Keep this many days of automatic SQLite backups. `0` disables backups. |
+| `js_beacon` | `true` | Referrer-recovery script on every counted page. `false` = zero JavaScript. |
+| `site_name` | `My Site` | Dashboard title. |
+| `count_dashboard` | `true` | Count visits to the dashboard itself as a normal hit. |
+| `live_interval` | `15` | Seconds between live dashboard refreshes. `0` disables live updating. |
+| `live_feed` | `true` | Show the public "Happening now" recent-views feed. |
+| `show_recent_log` | `true` | Show the detailed 50-row "Recent visitors" table. |
+| `show_campaigns` | `true` | Show the "Campaign sources" table when UTM data exists. |
+| `own_hosts` | `example.com, www.example.com` | Hosts treated as internal navigation, not referrers. |
+| `powered_by` | `true` | Show the "Powered by w3bguru.com" credit. Optional, no strings attached. |
