@@ -11,11 +11,15 @@
  * Deliberately does NOT include counter.php — hitting this endpoint must never
  * itself count as a page view.
  *
- * No rate limiting: a request here can only ever patch a row belonging to the
- * same visitor hash that made it (same IP + user agent), and only within a
- * 5-second window of that row landing. A stranger cannot touch anyone else's
- * data, and a flood of junk requests here costs no more than hitting any other
- * page on the site.
+ * POST only. This endpoint writes to the database, and a GET that writes can be
+ * fired by any third-party page simply by embedding an <img> tag pointing here:
+ * the visitor's browser would send it with their real IP and user agent, so a
+ * stranger's page could patch a row belonging to someone reading yours. Only
+ * navigator.sendBeacon reaches this, which is a POST.
+ *
+ * No rate limiting: a request here can only ever patch a row matching the same
+ * visitor hash, path and 5-second window, so a flood of junk costs no more than
+ * hitting any other page on the site.
  */
 
 require_once __DIR__ . '/lib.php';
@@ -26,8 +30,9 @@ header('X-Robots-Tag: noindex');
 $method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : 'GET';
 
 try {
-    if ($method !== 'POST' && $method !== 'GET') {
+    if ($method !== 'POST') {
         http_response_code(405);
+        header('Allow: POST');
         exit;
     }
 
@@ -39,23 +44,21 @@ try {
         throw new RuntimeException('js_beacon disabled');
     }
 
-    if ($method === 'POST') {
-        $body = json_decode((string) file_get_contents('php://input'), true);
-        $path = isset($body['p']) ? (string) $body['p'] : '';
-        $ref  = isset($body['r']) ? (string) $body['r'] : '';
-    } else {
-        $path = isset($_GET['p']) ? (string) $_GET['p'] : '';
-        $ref  = isset($_GET['r']) ? (string) $_GET['r'] : '';
-    }
+    $body = json_decode((string) file_get_contents('php://input'), true);
+    $path = isset($body['p']) && is_string($body['p']) ? $body['p'] : '';
+    $ref  = isset($body['r']) && is_string($body['r']) ? $body['r'] : '';
 
     $path    = substr((string) (parse_url($path, PHP_URL_PATH) ?: '/'), 0, 300);
     $refHost = w3b_counter_ref_host($cfg, $ref);
     $refUrl  = $refHost === '' ? '' : substr($ref, 0, 500);
 
-    $ip      = w3b_counter_ip();
+    $ip      = w3b_counter_ip($cfg);
     $ua      = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
     $now     = time();
     $visitor = w3b_counter_visitor($cfg, $ip, $ua, date('Y-m-d', $now));
+    if ($visitor === '') {
+        throw new RuntimeException('no usable salt');
+    }
 
     $db = w3b_counter_db($cfg);
 
@@ -81,10 +84,4 @@ try {
     // Silent by design — a broken beacon must never surface to the visitor.
 }
 
-if ($method === 'GET') {
-    // A real transparent pixel, so the <img> fallback never shows a broken icon.
-    header('Content-Type: image/gif');
-    echo base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7');
-} else {
-    http_response_code(204);
-}
+http_response_code(204);

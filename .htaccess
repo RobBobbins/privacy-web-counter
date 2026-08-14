@@ -1,0 +1,24 @@
+# Block web access to config.php.
+#
+# config.php is PHP, so normally it executes and reveals nothing. This is here
+# for when it doesn't: a wrong PHP handler line in the web root's .htaccess, a
+# host changing how .php is mapped, a half-finished upload. Any of those serve
+# the file as plain text, and it contains exclude_ips — your own IP address.
+#
+# The visitor-hash salt is not in config.php at all; it lives in data/salt.php,
+# behind data/.htaccess. Two separate barriers, on purpose.
+#
+# Reading config.php from PHP is a filesystem read and is unaffected by this.
+
+<Files "config.php">
+    # Apache 2.4+
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+
+    # Apache 2.2 and older
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</Files>

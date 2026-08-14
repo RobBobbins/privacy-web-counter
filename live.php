@@ -20,7 +20,10 @@ try {
 date_default_timezone_set($cfg['timezone']);
 
 $ranges   = ['12h' => 1, 'today' => 1, 'yesterday' => 1, '7' => 1, '30' => 1, '90' => 1, '365' => 1, 'all' => 1];
-$range    = isset($_GET['range']) && isset($ranges[$_GET['range']]) ? (string) $_GET['range'] : '30';
+// is_string() first: ?range[]=x makes $_GET['range'] an array, and an array used
+// as an array key is a fatal TypeError on PHP 8 — even inside isset().
+$range    = isset($_GET['range']) && is_string($_GET['range']) && isset($ranges[$_GET['range']])
+    ? $_GET['range'] : '30';
 $showBots = !empty($_GET['bots']);
 
 try {
@@ -101,7 +104,7 @@ try {
     }
 
     echo json_encode($out);
-} catch (Exception $e) {
+} catch (Throwable $e) {
     http_response_code(503);
     echo json_encode(['ok' => false]);
 }

@@ -47,7 +47,17 @@ AddType application/x-httpd-php .html .htm
 # --- Counter: block direct download of the database ----------------
 
 <FilesMatch "\.(db|db-wal|db-shm|sqlite)$">
-    Require all denied
+    # Apache 2.4+
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+
+    # Apache 2.2 and older. Without this fallback, "Require all denied" is an
+    # unrecognised directive on 2.2 and Apache returns 500 for the whole site.
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
 
 # ===================================================================

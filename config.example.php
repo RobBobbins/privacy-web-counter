@@ -4,7 +4,10 @@
  * Edit this file. Everything else can be replaced on upgrade without losing settings.
  *
  * Prefer a form to editing PHP? Visit install.php once instead — it writes this
- * exact file for you and then refuses to run again.
+ * exact file for you, plus data/salt.php, and then deletes itself.
+ *
+ * Creating these by hand instead? config.php is not enough on its own: the counter
+ * records nothing until data/salt.php exists too. See the salt note below.
  */
 
 return [
@@ -16,10 +19,31 @@ return [
     // Full list: https://www.php.net/manual/en/timezones.php
     'timezone' => 'UTC',
 
-    // Random secret used to hash visitor fingerprints. CHANGE THIS ONCE, then never
-    // change it again (changing it resets unique-visitor counting).
+    // NOTE: there is no 'salt' setting here any more. The visitor-hash salt lives
+    // in data/salt.php, because data/ is blocked from the web and this file is not.
+    // Create it with a long random string of your own, at least 16 characters:
+    //
+    //     <?php return 'a-long-random-string-you-generate-once';
+    //
+    // Or let install.php generate one for you. Until that file exists with a usable
+    // value, the counter deliberately records nothing at all — an unsalted hash of
+    // an IP address can be reversed by anyone, so no data beats bad data.
     // The raw IP address is NEVER stored — only a salted hash that rotates daily.
-    'salt' => 'PUT-A-LONG-RANDOM-STRING-HERE',
+
+    // Addresses of proxies permitted to set X-Forwarded-For, X-Real-IP or
+    // CF-Connecting-IP. Plain IPs or CIDR ranges, IPv4 or IPv6.
+    //
+    // Leave this EMPTY unless a CDN or reverse proxy genuinely sits in front of
+    // this site. Those headers are written by whoever sends the request, so any
+    // address you list here is trusted to claim it is any visitor it likes —
+    // which would let it forge unlimited unique visitors, or impersonate an
+    // address from exclude_ips and never be counted.
+    //
+    // Behind Cloudflare, put Cloudflare's published ranges here:
+    // https://www.cloudflare.com/ips/
+    'trusted_proxies' => [
+        // '173.245.48.0/20',
+    ],
 
     // Requests to these paths are never counted. Exact match, case-insensitive.
     // This folder's own live.php (and index.php, unless count_dashboard is on)
@@ -79,19 +103,20 @@ return [
     'live_interval' => 15,
 
     // Show the "Happening now" feed of the most recent page views?
-    // NOTE: your dashboard is public, so this feed is public too — anyone
-    // watching sees which pages are being read, seconds after it happens.
-    // No IP addresses or identities are ever exposed, but set this to false
-    // if you'd rather not broadcast it.
-    'live_feed' => true,
+    // OFF by default. Your dashboard is public, so this feed is public too —
+    // anyone watching sees which pages are being read, seconds after it happens.
+    // No IP addresses or identities are ever exposed. Turn it on deliberately.
+    'live_feed' => false,
 
     // How many recent hits the "Happening now" live feed shows at once.
     'live_feed_limit' => 10,
 
     // Show the detailed "Recent visitors" table (one row each, with
-    // browser/OS/device/referrer)? More revealing than the live feed above
-    // since it doesn't auto-hide anything — set to false to drop it.
-    'show_recent_log' => true,
+    // browser/OS/device/referrer)? OFF by default, and the most revealing thing
+    // on the dashboard: on a low-traffic site those rows read as a trace of what
+    // one individual browsed, publicly. Aggregate totals above expose nothing of
+    // the sort. Turn it on only if you have thought about that.
+    'show_recent_log' => false,
 
     // How many hits the "Recent visitors" table shows.
     'recent_log_limit' => 50,

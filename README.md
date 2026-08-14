@@ -54,10 +54,11 @@ whatever you actually chose.
 |---|---|
 | `config.php` | `/public_html/YOUR-FOLDER-NAME/config.php` |
 | *(`config.example.php` is a fallback template — see below)* | |
+| `.htaccess` | `/public_html/YOUR-FOLDER-NAME/.htaccess` |
 | `lib.php` | `/public_html/YOUR-FOLDER-NAME/lib.php` |
 | `counter.php` | `/public_html/YOUR-FOLDER-NAME/counter.php` |
 | `referrer.php` | `/public_html/YOUR-FOLDER-NAME/referrer.php` |
-| `install.php` | `/public_html/YOUR-FOLDER-NAME/install.php` |
+| `install.php` | `/public_html/YOUR-FOLDER-NAME/install.php` *(deletes itself after setup)* |
 | `index.php` | `/public_html/YOUR-FOLDER-NAME/index.php` |
 | `live.php` | `/public_html/YOUR-FOLDER-NAME/live.php` |
 | `data/.htaccess` | `/public_html/YOUR-FOLDER-NAME/data/.htaccess` |
@@ -65,26 +66,44 @@ whatever you actually chose.
 
 `stats.db` is created automatically on the first counted page view. Do not upload one.
 
+`data/salt.php` is created for you by `install.php` and holds the visitor-hash salt.
+Do not upload one, do not commit one, and do not move it into `config.php` — see
+[Where the salt lives](#where-the-salt-lives).
+
+Both `.htaccess` files matter. The one in `data/` blocks the database; the one in the
+package folder blocks `config.php`, which contains `exclude_ips` — your own IP address.
+
 Some hosts have no `public_html` folder at all — the FTP root **is** the web root. If
 that's yours, drop `YOUR-FOLDER-NAME` straight into the FTP root instead.
 
 ## Install
 
 1. **Upload everything** to a folder of your choice in your web root, so you end up
-   with `/YOUR-FOLDER-NAME/` containing `config.example.php`, `lib.php`, `counter.php`,
-   `referrer.php`, `install.php`, `index.php`, `live.php` and a `data` folder holding
-   `.htaccess`.
+   with `/YOUR-FOLDER-NAME/` containing `config.example.php`, `.htaccess`, `lib.php`,
+   `counter.php`, `referrer.php`, `install.php`, `index.php`, `live.php` and a `data`
+   folder holding `.htaccess`.
 
 2. **Make `data` writable.** In your FTP client or file manager, set the permissions
-   of `/YOUR-FOLDER-NAME/data/` to `755`. If the counter records nothing later, try `777`.
+   of `/YOUR-FOLDER-NAME/data/` to `755`.
 
-3. **Visit `https://yoursite.com/YOUR-FOLDER-NAME/install.php`** and fill in the form.
-   It writes `config.php` for you, including a freshly generated salt, and then refuses
-   to run again — safe to leave it in place indefinitely, no need to delete it.
+   If the counter records nothing later, ask your host which user PHP runs as and have
+   the folder owned by it. Do **not** reach for `777`: on shared hosting that grants
+   write access to every other account on the same server, and this folder holds both
+   your database and your visitor-hash salt.
+
+3. **Visit `https://yoursite.com/YOUR-FOLDER-NAME/install.php` promptly** and fill in
+   the form. It writes `config.php` and `data/salt.php` for you, with a freshly
+   generated salt, and then **deletes itself**.
+
+   Do this as soon as the upload finishes. Until setup runs, that page is an
+   unauthenticated form that chooses your visitor-hash salt, and whoever loads it first
+   picks that salt. If you ever open it and see "Already configured" on a site you have
+   not set up yet, someone else got there first: delete `config.php` and `data/salt.php`
+   and run it again.
 
    Prefer to edit PHP by hand? Skip the installer: copy `config.example.php` to
-   `config.php` yourself and fill in the values — every setting is explained in its
-   comments. `install.php` simply won't offer its form once `config.php` exists either way.
+   `config.php`, create `data/salt.php` yourself as described in
+   [Where the salt lives](#where-the-salt-lives), and delete `install.php` over FTP.
 
 4. **Edit the `.htaccess` in your web root.** Open `root-htaccess-SNIPPET.txt`, copy
    the contents, and **append** it to your web root's `.htaccess` (not the one in
@@ -136,10 +155,10 @@ Settings in `config.php`:
 
 - `live_interval` — seconds between refreshes, default `15`. Set to `0` to turn live
   updating off completely and go back to a plain static page.
-- `live_feed` — set to `false` to keep the numbers live but drop the recent-views list.
-  Worth considering: **your dashboard is public, so that feed is public too.** It exposes
-  no IP addresses or identities, but anyone watching can see which pages are being read
-  within seconds of it happening.
+- `live_feed` — **off by default.** Set to `true` to add the recent-views list beneath
+  the live numbers. Worth thinking about before you do: **your dashboard is public, so
+  that feed is public too.** It exposes no IP addresses or identities, but anyone
+  watching can see which pages are being read within seconds of it happening.
 
 ## Referrer recovery & campaign tracking
 
@@ -151,11 +170,17 @@ When `config['js_beacon']` is on (the default), `counter.php` buffers each page 
 appends one small inline script right before `</body>`:
 
 ```html
-<script>(function(p,r,u){navigator.sendBeacon?navigator.sendBeacon(u,
-JSON.stringify({p:p,r:r})):(new Image()).src=u+'?p='+encodeURIComponent(p)
-+'&r='+encodeURIComponent(r);})(location.pathname,document.referrer,'/YOUR-FOLDER-NAME/referrer.php');
+<script>(function(p,r,u){if(navigator.sendBeacon)navigator.sendBeacon(u,
+JSON.stringify({p:p,r:r}));})(location.pathname,document.referrer,'/YOUR-FOLDER-NAME/referrer.php');
 </script>
 ```
+
+`navigator.sendBeacon` only, with no image-pixel fallback. An `<img>` beacon would mean
+`referrer.php` had to accept `GET`, and a `GET` that writes to the database can be fired
+by *any* third-party page: it just embeds an image tag pointing at your endpoint, and the
+visitor's browser sends it with their real IP and user agent. `sendBeacon` is a `POST`
+and is supported by every browser released in the last decade. On anything older, the
+hit is still counted — it simply reports as "JavaScript did not run."
 
 It runs on every counted page and always reports back — either a referrer value, or
 confirmation that there wasn't one. That second case matters: without it, "no referrer
@@ -167,8 +192,9 @@ JavaScript was off or blocked.
 recent hit from the same visitor hash and page path, within 5 seconds. No cookie or new
 identifier is involved: it's the same daily-rotating `visitor` hash described in
 [Privacy design](#privacy-design), recomputed from the beacon's own IP and user agent. A
-request can therefore only ever touch a row that belongs to whoever sent it — there's no
-rate limiting because there's nothing for a stranger to abuse.
+request can therefore only ever touch a row matching its own visitor hash, page path and
+5-second window, so there's no rate limiting — a flood of junk costs no more than loading
+any other page.
 
 On the dashboard, a **JavaScript enabled** card shows how many hits had the beacon report
 back versus not, plus how many referrers it actually recovered.
@@ -204,15 +230,29 @@ included.
 - **You must edit every page you want counted.** Pages without the include line
   are invisible to the counter.
 - **If `js_beacon` is on, every counted page makes one small extra request** via
-  `navigator.sendBeacon` (or an image request as a fallback) to `referrer.php`. It
-  fires on every page view, not just direct ones — see
-  [Referrer recovery](#referrer-recovery--campaign-tracking) — since that's the only
-  way to distinguish a confirmed-direct visit from one where JavaScript never ran.
-  Turn `js_beacon` off if you'd rather the tracker made zero requests, full stop.
-- **The dashboard is public.** Anyone who finds `/YOUR-FOLDER-NAME/` can read your
-  traffic numbers. It carries `noindex` so search engines skip it, but that is a
-  request, not a lock. If `count_dashboard` is on (the default), visits to the
-  dashboard itself appear in the Top pages list like any other page.
+  `navigator.sendBeacon` to `referrer.php`. It fires on every page view, not just
+  direct ones — see [Referrer recovery](#referrer-recovery--campaign-tracking) — since
+  that's the only way to distinguish a confirmed-direct visit from one where JavaScript
+  never ran. Turn `js_beacon` off if you'd rather the tracker made zero requests, full
+  stop. Browsers too old for `sendBeacon` are still counted; they just report as
+  "JavaScript did not run".
+- **The dashboard is public, and there is no password.** Anyone who finds
+  `/YOUR-FOLDER-NAME/` can read your traffic numbers. It carries `noindex` so search
+  engines skip it, but that is a request, not a lock. If `count_dashboard` is on (the
+  default), visits to the dashboard itself appear in the Top pages list like any other
+  page.
+
+  Because of that, the two views that expose individual behaviour — `live_feed` and
+  `show_recent_log` — ship **off**. Aggregate totals tell a stranger how busy you are.
+  A row-by-row list of paths with times, browser, OS, device and country beside them is
+  a different thing: on a quiet site it reads as a trace of what one identifiable person
+  browsed. Turn them on for yourself if you want them; know that you are turning them on
+  for everyone else too.
+- **Referrer spam is possible.** `referrer.php` only ever patches a row created by the
+  same visitor hash, so nobody can alter anyone else's data — but someone can load a
+  page of yours and then report a made-up referrer for their own hit, and that hostname
+  will appear in your referrers list. It is cosmetic, and short of putting the dashboard
+  behind a login there is no way to fully prevent it.
 
 ## If `.html` parsing won't work on your host
 
@@ -236,6 +276,40 @@ followed across days, and it cannot be reversed to recover an IP. Raw IP address
 are never written to disk. This is the same technique Plausible and Fathom use, and
 it is what makes the counter GDPR/PIPEDA-friendly without a cookie banner.
 
+### Where the salt lives
+
+**`data/salt.php`, never `config.php`.** That hash is irreversible *only while the salt
+is secret*. Anyone holding it can hash the entire IPv4 address space in minutes and turn
+every stored `visitor` value back into a real IP address — so the salt, not the hash, is
+what actually protects your visitors.
+
+`data/` is the folder blocked from the web by `data/.htaccess`, which is why the salt
+lives there. `install.php` creates the file for you. By hand, it is just:
+
+```php
+<?php return 'a-long-random-string-you-generate-once';
+```
+
+At least 16 characters. If that file is missing, unreadable, or shorter than that, **the
+counter records nothing at all** and the dashboard says so in red. That is deliberate:
+an unsalted hash of an IP address is reversible by anyone, so storing one would be worse
+than losing the traffic. Back it up alongside `stats.db` — losing it resets
+unique-visitor counting the same way changing it does.
+
+### Visitors cannot forge their own identity
+
+The visitor hash is built from the IP address in `REMOTE_ADDR`. The `X-Forwarded-For`,
+`X-Real-IP` and `CF-Connecting-IP` headers are **ignored** unless the address making the
+request appears in `trusted_proxies`, because those headers are written by whoever sent
+the request. Trusting them blindly lets any visitor invent a new IP per request and
+manufacture unlimited "unique visitors", or claim an address from `exclude_ips` and never
+be counted at all.
+
+Behind a real CDN, list its ranges in `trusted_proxies` — for Cloudflare, from
+<https://www.cloudflare.com/ips/>. `X-Forwarded-For` is then read from the right-hand end
+of the chain inward, because everything at the left-hand end was supplied by the client
+and can say anything it likes.
+
 ## Every setting
 
 Set these with `install.php`, or by editing `config.php` directly:
@@ -243,7 +317,8 @@ Set these with `install.php`, or by editing `config.php` directly:
 | Setting | Default | What it does |
 |---|---|---|
 | `timezone` | `UTC` | Timezone used for days/hours throughout the dashboard. |
-| `salt` | *(random)* | Set once, never change — changing it resets unique-visitor counting. |
+| *(salt)* | *(random)* | **Not a `config.php` setting.** Lives in `data/salt.php` — see [Where the salt lives](#where-the-salt-lives). |
+| `trusted_proxies` | *(none)* | Proxy IPs/CIDRs allowed to set `X-Forwarded-For` etc. Leave empty unless a CDN is genuinely in front of you. |
 | `exclude_paths` | robots.txt, favicon.ico, sitemap.xml | Paths never counted. This folder's own pages are excluded automatically. |
 | `exclude_ips` | *(none)* | IPs never counted — add your own from ifconfig.me. |
 | `record_bots` | `true` | Store bot hits (hidden from the dashboard by default) instead of dropping them. |
@@ -253,9 +328,9 @@ Set these with `install.php`, or by editing `config.php` directly:
 | `site_name` | `My Site` | Dashboard title. |
 | `count_dashboard` | `true` | Count visits to the dashboard itself as a normal hit. |
 | `live_interval` | `15` | Seconds between live dashboard refreshes. `0` disables live updating. |
-| `live_feed` | `true` | Show the public "Happening now" recent-views feed. |
+| `live_feed` | `false` | Show the public "Happening now" recent-views feed. Off by default — it is public. |
 | `live_feed_limit` | `10` | Rows shown in the "Happening now" feed. |
-| `show_recent_log` | `true` | Show the detailed "Recent visitors" table. |
+| `show_recent_log` | `false` | Show the detailed "Recent visitors" table. Off by default — the most revealing view here. |
 | `recent_log_limit` | `50` | Rows shown in the "Recent visitors" table. |
 | `show_campaigns` | `true` | Show the "Campaign sources" table when UTM data exists. |
 | `own_hosts` | `example.com, www.example.com` | Hosts treated as internal navigation, not referrers. |

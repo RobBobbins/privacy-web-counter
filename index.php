@@ -25,6 +25,10 @@ try {
 }
 date_default_timezone_set($cfg['timezone']);
 
+// Without a usable salt the counter refuses to record anything at all, by
+// design. Say so loudly here, or a broken salt file looks like a quiet site.
+$saltMissing = w3b_counter_salt($cfg) === '';
+
 try {
     $db = new PDO('sqlite:' . $cfg['db_path']);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -35,8 +39,9 @@ try {
     echo '<!doctype html><meta charset="utf-8"><title>Stats</title>'
        . '<body style="font:16px system-ui;padding:2rem;max-width:40rem">'
        . '<h1>No data yet</h1><p>The counter database has not been created. It appears '
-       . 'automatically the first time a page carrying the counter is visited.</p>'
-       . '<p style="color:#888">' . htmlspecialchars($e->getMessage(), ENT_QUOTES) . '</p>';
+       . 'automatically the first time a page carrying the counter is visited.</p>';
+    // The exception message is deliberately not shown: it carries the database's
+    // full filesystem path, and this page is public.
     exit;
 }
 
@@ -52,7 +57,10 @@ $ranges = [
     '365'       => 'Last year',
     'all'       => 'All time',
 ];
-$range    = isset($_GET['range']) && isset($ranges[$_GET['range']]) ? $_GET['range'] : '30';
+// is_string() first: ?range[]=x makes $_GET['range'] an array, and an array used
+// as an array key is a fatal TypeError on PHP 8 — even inside isset().
+$range    = isset($_GET['range']) && is_string($_GET['range']) && isset($ranges[$_GET['range']])
+    ? $_GET['range'] : '30';
 $showBots = !empty($_GET['bots']);
 
 // $dateWhere/$dateParams hold just the date-range clause (no bot filter), so
@@ -338,6 +346,8 @@ ul.feed li.fresh{animation:flash 1.6s ease-out}
   .live .dot,ul.feed li.fresh,[data-live].bump{animation:none}
 }
 footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
+.warn{border:1px solid var(--bot);border-radius:6px;padding:.8rem 1rem;margin:0 0 1.5rem;font-size:.85rem}
+.warn b{color:var(--bot)}
 </style>
 <div class="wrap">
 
@@ -354,6 +364,13 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2rem;line-height:1.7}
     <?= !empty($cfg['js_beacon']) ? 'Uses one small JavaScript beacon for referrer recovery — see the README.' : 'No JavaScript.' ?>
     <?php if ($firstDay): ?>Recording since <?= h($firstDay) ?>.<?php endif; ?>
   </p>
+
+  <?php if ($saltMissing): ?>
+    <p class="warn"><b>Nothing is being recorded.</b> The visitor-hash salt at
+    <code>data/salt.php</code> is missing or too short, so the counter is refusing to
+    write hits rather than store a hash that could be reversed. Re-create that file to
+    start counting again.</p>
+  <?php endif; ?>
 
   <nav class="tabs">
     <?php foreach ($ranges as $k => $label): ?>

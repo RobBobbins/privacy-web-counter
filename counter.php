@@ -48,9 +48,12 @@ $selfUrlPath = w3b_counter_self_url_path();
 if (is_array($cfg) && !empty($cfg['js_beacon'])) {
     $beaconUrl = $selfUrlPath . '/referrer.php';
     ob_start(function ($html) use ($beaconUrl) {
-        $script = '<script>(function(p,r,u){navigator.sendBeacon?navigator.sendBeacon(u,'
-                . 'JSON.stringify({p:p,r:r})):(new Image()).src=u+\'?p=\'+encodeURIComponent(p)'
-                . '+\'&r=\'+encodeURIComponent(r);})(location.pathname,document.referrer,'
+        // sendBeacon only, no image fallback: an <img> beacon means referrer.php
+        // has to accept GET, and a GET that writes to the database can be fired
+        // from any third-party page using your visitor's own IP and user agent.
+        // Browsers without sendBeacon simply show as "JavaScript did not run".
+        $script = '<script>(function(p,r,u){if(navigator.sendBeacon)navigator.sendBeacon(u,'
+                . 'JSON.stringify({p:p,r:r}));})(location.pathname,document.referrer,'
                 . json_encode($beaconUrl) . ');</script>';
         $patched = preg_replace('/<\/body>/i', $script . '</body>', $html, 1);
         return $patched === null ? $html : $patched;
@@ -92,7 +95,7 @@ try {
         }
     }
 
-    $ip = w3b_counter_ip();
+    $ip = w3b_counter_ip($cfg);
     if (in_array($ip, $cfg['exclude_ips'], true)) {
         return;
     }
@@ -126,7 +129,14 @@ try {
 
     // Visitor fingerprint: salted hash of IP + user agent, re-salted every day.
     // Irreversible, and it expires on its own — no cookie, no persistent ID.
+    //
+    // '' means data/salt.php is missing or unusable. Record nothing at all in
+    // that case: an unsalted hash of IP + user agent is reversible by anyone,
+    // so writing one would be worse than losing the hit.
     $visitor = w3b_counter_visitor($cfg, $ip, $ua, $now->format('Y-m-d'));
+    if ($visitor === '') {
+        return;
+    }
 
     $db = w3b_counter_db($cfg);
     $stmt = $db->prepare(

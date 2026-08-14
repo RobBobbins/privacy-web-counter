@@ -105,24 +105,163 @@ function w3b_counter_backup(array $cfg, PDO $db)
     }
 }
 
-/** Best guess at the real client IP, trusting proxy headers only when present. */
-function w3b_counter_ip()
+/** True if $ip falls inside $list, whose entries are plain IPs or CIDR ranges. */
+function w3b_counter_ip_in_list($ip, array $list)
 {
-    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR'] as $key) {
+    if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP)) {
+        return false;
+    }
+
+    foreach ($list as $entry) {
+        $entry = trim((string) $entry);
+        if ($entry === '') {
+            continue;
+        }
+
+        if (strpos($entry, '/') === false) {
+            if (strcasecmp($ip, $entry) === 0) {
+                return true;
+            }
+            continue;
+        }
+
+        list($net, $bits) = explode('/', $entry, 2);
+        if (!filter_var($net, FILTER_VALIDATE_IP) || !ctype_digit($bits)) {
+            continue;
+        }
+
+        // Compare as packed bytes, so the same code handles IPv4 and IPv6.
+        $ipBin  = @inet_pton($ip);
+        $netBin = @inet_pton($net);
+        if ($ipBin === false || $netBin === false || strlen($ipBin) !== strlen($netBin)) {
+            continue;   // different families never match
+        }
+
+        $bits = (int) $bits;
+        if ($bits < 0 || $bits > strlen($ipBin) * 8) {
+            continue;
+        }
+
+        $whole = intdiv($bits, 8);
+        $rest  = $bits % 8;
+        if ($whole > 0 && strncmp($ipBin, $netBin, $whole) !== 0) {
+            continue;
+        }
+        if ($rest > 0) {
+            $mask = chr((0xFF << (8 - $rest)) & 0xFF);
+            if (((ord($ipBin[$whole]) ^ ord($netBin[$whole])) & ord($mask)) !== 0) {
+                continue;
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * The real client IP.
+ *
+ * Proxy headers are read ONLY when REMOTE_ADDR is itself one of the addresses
+ * in config['trusted_proxies']. That check is the whole point: these headers
+ * are supplied by whoever made the request, so trusting them unconditionally
+ * lets any visitor forge an unlimited number of "unique visitors", or claim an
+ * address from exclude_ips and never be counted at all.
+ *
+ * With no trusted proxies configured — the default, and correct for ordinary
+ * shared hosting — this returns REMOTE_ADDR and nothing else.
+ */
+function w3b_counter_ip(array $cfg)
+{
+    $remote  = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';
+    $trusted = isset($cfg['trusted_proxies']) && is_array($cfg['trusted_proxies'])
+        ? $cfg['trusted_proxies']
+        : [];
+
+    if (!$trusted || !w3b_counter_ip_in_list($remote, $trusted)) {
+        return $remote;
+    }
+
+    // Single-value headers, written by the proxy itself rather than forwarded.
+    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP'] as $key) {
         if (!empty($_SERVER[$key])) {
-            $ip = trim(explode(',', $_SERVER[$key])[0]);
+            $ip = trim($_SERVER[$key]);
             if (filter_var($ip, FILTER_VALIDATE_IP)) {
                 return $ip;
             }
         }
     }
-    return isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';
+
+    // X-Forwarded-For is a chain — "client, proxy1, proxy2" — and everything
+    // the client sent sits at the LEFT, where it can say anything it likes.
+    // Walk from the right instead and take the first address that isn't one of
+    // our own trusted proxies: that is the last hop we can actually vouch for.
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $chain = array_map('trim', explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']));
+        for ($i = count($chain) - 1; $i >= 0; $i--) {
+            if (!filter_var($chain[$i], FILTER_VALIDATE_IP)) {
+                continue;
+            }
+            if (!w3b_counter_ip_in_list($chain[$i], $trusted)) {
+                return $chain[$i];
+            }
+        }
+    }
+
+    return $remote;
 }
 
-/** Salted, daily-rotating visitor fingerprint. Irreversible, no cookie. */
+/** Where the visitor-hash salt lives: alongside the database, inside data/. */
+function w3b_counter_salt_path(array $cfg)
+{
+    return dirname($cfg['db_path']) . '/salt.php';
+}
+
+/**
+ * The visitor-hash salt, or '' if it is missing or too short to be safe.
+ *
+ * It lives in data/salt.php rather than config.php because data/ is the folder
+ * this package blocks from the web. The salt is the entire privacy model: the
+ * stored visitor hash is only irreversible while the salt is secret, since an
+ * attacker holding it can hash the whole IPv4 space in minutes and turn every
+ * row back into an address.
+ *
+ * Read as text rather than require()d, so that a half-written or truncated file
+ * yields '' instead of a parse error taking a visitor's page down with it.
+ */
+function w3b_counter_salt(array $cfg)
+{
+    static $salt = null;
+    if ($salt !== null) {
+        return $salt;
+    }
+
+    $salt = '';
+    $raw  = @file_get_contents(w3b_counter_salt_path($cfg));
+    if (is_string($raw) && preg_match('/return\s+\'((?:[^\'\\\\]|\\\\.)*)\'\s*;/s', $raw, $m)) {
+        $value = stripcslashes($m[1]);
+        if (strlen($value) >= 16) {
+            $salt = $value;
+        }
+    }
+
+    return $salt;
+}
+
+/**
+ * Salted, daily-rotating visitor fingerprint. Irreversible, no cookie.
+ *
+ * Returns '' when no usable salt exists. Callers must treat that as "record
+ * nothing" — hashing without a salt would produce a value anyone could reverse,
+ * which is worse than not counting at all.
+ */
 function w3b_counter_visitor(array $cfg, $ip, $ua, $day)
 {
-    return substr(hash('sha256', $cfg['salt'] . $day . $ip . $ua), 0, 20);
+    $salt = w3b_counter_salt($cfg);
+    if ($salt === '') {
+        return '';
+    }
+    return substr(hash('sha256', $salt . $day . $ip . $ua), 0, 20);
 }
 
 /** True if the user agent looks like a crawler, monitor or command-line tool. */

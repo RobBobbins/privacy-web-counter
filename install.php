@@ -2,12 +2,18 @@
 /**
  * Privacy Web Counter — setup wizard.
  *
- * Visit this once after uploading the package. It writes config.php for you.
+ * Visit this once after uploading the package. It writes config.php and
+ * data/salt.php for you, and then DELETES ITSELF.
  *
- * Refuses to run at all once config.php exists — delete config.php first if
- * you want to redo setup from scratch. Safe to leave this file in place
- * indefinitely: it becomes a permanent no-op the moment config.php exists, so
- * there is no need to delete it after using it.
+ * Self-deletion is the point: this page has no password, and it is the one
+ * thing on the site that chooses the visitor-hash salt. Left lying around, it
+ * becomes live again the moment config.php goes missing — a botched FTP
+ * overwrite, a rename, a tidy-up — and whoever loads it first picks the salt
+ * for every visitor hash thereafter. Once setup is done there is nothing left
+ * for it to do, so it goes.
+ *
+ * It refuses to run while config.php exists, which covers the gap if deletion
+ * ever fails. To redo setup, re-upload this file from the repository.
  *
  * Every value from the form goes through var_export() or an explicit (int)
  * cast before it's written into config.php, never raw string concatenation —
@@ -36,6 +42,8 @@ $errors = [];
 $saved  = false;
 $writeError = null;
 $generatedPhp = null;
+$generatedSalt = null;
+$selfDeleted = false;
 
 $str = function ($key, $default = '') {
     return isset($_POST[$key]) ? trim((string) $_POST[$key]) : $default;
@@ -55,8 +63,11 @@ $salt         = $isPost ? $str('salt') : bin2hex(random_bytes(24));
 $recordBots     = $isPost ? !empty($_POST['record_bots'])     : true;
 $jsBeacon       = $isPost ? !empty($_POST['js_beacon'])       : true;
 $countDashboard = $isPost ? !empty($_POST['count_dashboard']) : true;
-$liveFeed       = $isPost ? !empty($_POST['live_feed'])       : true;
-$showRecentLog  = $isPost ? !empty($_POST['show_recent_log']) : true;
+// The two per-visitor displays default OFF. Aggregate totals are harmless on a
+// public dashboard; a row-by-row trace of what one person read, with their
+// browser, OS, device and country beside it, is not. Opt in deliberately.
+$liveFeed       = $isPost ? !empty($_POST['live_feed'])       : false;
+$showRecentLog  = $isPost ? !empty($_POST['show_recent_log']) : false;
 $showCampaigns  = $isPost ? !empty($_POST['show_campaigns'])  : true;
 $poweredBy      = $isPost ? !empty($_POST['powered_by'])      : true;
 $showGithub     = $isPost ? !empty($_POST['show_github'])     : true;
@@ -105,7 +116,15 @@ if ($isPost) {
         $lines[] = 'return [';
         $lines[] = "    'db_path' => __DIR__ . '/data/stats.db',";
         $lines[] = "    'timezone' => " . var_export($timezone, true) . ',';
-        $lines[] = "    'salt' => " . var_export($salt, true) . ',';
+        $lines[] = '';
+        $lines[] = '    // The visitor-hash salt is NOT here — it lives in data/salt.php, which is';
+        $lines[] = '    // blocked from the web. Do not move it back into this file.';
+        $lines[] = '';
+        $lines[] = '    // Addresses of proxies allowed to set X-Forwarded-For / X-Real-IP /';
+        $lines[] = '    // CF-Connecting-IP. Leave empty unless a CDN really sits in front of';
+        $lines[] = '    // this site: any address listed here can claim to be any visitor.';
+        $lines[] = "    'trusted_proxies' => [],";
+        $lines[] = '';
         $lines[] = "    'exclude_paths' => " . var_export(['/robots.txt', '/favicon.ico', '/sitemap.xml'], true) . ',';
         $lines[] = "    'exclude_ips' => " . var_export($excludeIpsArr, true) . ',';
         $lines[] = "    'record_bots' => " . var_export($recordBots, true) . ',';
@@ -127,15 +146,40 @@ if ($isPost) {
         $lines[] = '';
         $generatedPhp = implode("\n", $lines);
 
+        $generatedSalt = "<?php\n"
+            . "/**\n"
+            . " * Visitor-hash salt — the secret behind every 'visitor' value in the database.\n"
+            . " *\n"
+            . " * It lives in data/ because data/.htaccess blocks this folder from the web.\n"
+            . " * Anyone who obtains this string can hash the entire IPv4 address space in\n"
+            . " * minutes and turn every stored visitor hash back into a real IP address.\n"
+            . " * Never commit it, never paste it anywhere, and back it up alongside the\n"
+            . " * database — losing it resets unique-visitor counting.\n"
+            . " */\n"
+            . "\n"
+            . 'return ' . var_export($salt, true) . ";\n";
+
         $dataDir = __DIR__ . '/data';
         if (!is_dir($dataDir)) {
             @mkdir($dataDir, 0755, true);
         }
 
-        if (@file_put_contents($configPath, $generatedPhp, LOCK_EX) !== false) {
-            $saved = true;
+        // Salt first: config.php existing is what locks this installer, so it must
+        // not appear until the salt beside it is safely on disk.
+        $saltOk = @file_put_contents($dataDir . '/salt.php', $generatedSalt, LOCK_EX) !== false;
+
+        if (!$saltOk) {
+            $writeError = 'Could not write data/salt.php — that folder is not writable by PHP.';
+        } elseif (@file_put_contents($configPath, $generatedPhp, LOCK_EX) === false) {
+            $writeError = 'Could not write config.php — this folder is not writable by PHP.';
         } else {
-            $writeError = 'Could not write config.php — this folder is probably not writable by PHP.';
+            $saved = true;
+
+            // Nothing left for this file to do, and leaving it is a standing risk —
+            // see the note at the top. Writing config.php just proved PHP can create
+            // files in this directory, which is the same permission unlink needs, so
+            // this almost always succeeds. If it doesn't, the success page says so.
+            $selfDeleted = @unlink(__FILE__);
         }
     }
 }
@@ -214,16 +258,31 @@ a{color:var(--accent)}
 <?php if ($saved): ?>
 
   <div class="section success">
-    <h1>config.php written</h1>
-    <p>Your settings are saved. This page will refuse to run again as long as
-    <code>config.php</code> exists, so it's safe to leave <code>install.php</code>
-    right where it is.</p>
+    <h1>Setup complete</h1>
+    <p>Written: <code>config.php</code> for your settings, and <code>data/salt.php</code>
+    for the visitor-hash salt. Keep <code>data/salt.php</code> secret and back it up with
+    your database — losing it resets unique-visitor counting.</p>
+    <?php if ($selfDeleted): ?>
+      <p><code>install.php</code> has deleted itself. It had no password and it chooses
+      the salt, so leaving it in place would mean anyone could re-run setup if
+      <code>config.php</code> ever went missing. Re-upload it from the repository if you
+      need to redo setup.</p>
+    <?php else: ?>
+      <div class="errors">
+        <strong>Delete <code>install.php</code> yourself now, over FTP.</strong>
+        <p style="margin:.6rem 0 0">It could not remove itself. Until it is gone, anyone
+        who reaches this URL can re-run setup and choose your visitor-hash salt if
+        <code>config.php</code> is ever deleted or renamed.</p>
+      </div>
+    <?php endif; ?>
   </div>
   <div class="section">
     <h2>Next steps</h2>
     <ol class="next">
-      <li>Make sure <code>data/</code> is writable by PHP (<code>755</code>, or
-        <code>777</code> if hits still aren't recording).</li>
+      <li>Make sure <code>data/</code> is writable by PHP — <code>755</code> normally.
+        If hits still aren't recording, ask your host which owner PHP runs as rather
+        than setting <code>777</code>, which on shared hosting grants write access to
+        every other account on the server.</li>
       <li>Add this line to the very top of every page you want counted — before
         <code>&lt;!doctype html&gt;</code>, nothing in front of it, not even a space:
         <br><code>&lt;?php require_once $_SERVER['DOCUMENT_ROOT'] . '/YOUR-FOLDER-NAME/counter.php'; ?&gt;</code></li>
@@ -239,14 +298,19 @@ a{color:var(--accent)}
   <h1>Set up Privacy Web Counter</h1>
   <p class="sub">A self-hosted, first-party traffic counter — no cookies, no third-party domain, no IP
   addresses stored. Source on <a href="https://github.com/RobBobbins/privacy-web-counter">GitHub</a>.</p>
-  <p class="sub">This writes <code>config.php</code> for you. Nothing is tracked until you finish this.</p>
+  <p class="sub">This writes <code>config.php</code> and <code>data/salt.php</code> for you,
+  then deletes itself. Nothing is tracked until you finish this.</p>
 
   <?php if ($writeError): ?>
     <div class="errors">
       <strong><?= h($writeError) ?></strong>
-      <p style="margin:.6rem 0 0">Create <code>config.php</code> yourself instead — copy the text
-      below into a new file at <code>config.php</code> in this same folder:</p>
+      <p style="margin:.6rem 0 0">Create both files yourself instead. First
+      <code>data/salt.php</code> — keep this one secret, it must never be readable
+      from the web:</p>
+      <textarea class="code" readonly onclick="this.select()"><?= h($generatedSalt) ?></textarea>
+      <p style="margin:.6rem 0 0">Then <code>config.php</code>, in this same folder:</p>
       <textarea class="code" readonly onclick="this.select()"><?= h($generatedPhp) ?></textarea>
+      <p style="margin:.6rem 0 0">Delete <code>install.php</code> over FTP once both exist.</p>
     </div>
   <?php endif; ?>
 
@@ -282,7 +346,8 @@ a{color:var(--accent)}
       <div class="field">
         <label for="salt">Visitor-hash salt</label>
         <input type="text" id="salt" name="salt" value="<?= h($salt) ?>">
-        <p class="help">Auto-generated — leave as is. Set once; changing it later resets unique-visitor counting.</p>
+        <p class="help">Auto-generated — leave as is. Saved to <code>data/salt.php</code>, never to
+        <code>config.php</code>. Set once; changing it later resets unique-visitor counting.</p>
       </div>
     </div>
 
@@ -336,8 +401,8 @@ a{color:var(--accent)}
       <div class="check">
         <input type="checkbox" id="live_feed" name="live_feed" value="1"<?= $liveFeed ? ' checked' : '' ?>>
         <div><label for="live_feed">Show the "Happening now" live feed</label>
-        <p class="help">Your dashboard is public, so this feed is too — no identities exposed, but
-        anyone watching sees which pages are being read within seconds.</p></div>
+        <p class="help">Off by default. Your dashboard is public, so this feed is too — no
+        identities exposed, but anyone watching sees which pages are being read within seconds.</p></div>
       </div>
       <div class="field">
         <label for="live_feed_limit">Live feed rows</label>
@@ -347,7 +412,9 @@ a{color:var(--accent)}
       <div class="check">
         <input type="checkbox" id="show_recent_log" name="show_recent_log" value="1"<?= $showRecentLog ? ' checked' : '' ?>>
         <div><label for="show_recent_log">Show the detailed "Recent visitors" table</label>
-        <p class="help">One row each, with browser/OS/device/referrer. More detailed than the live feed above.</p></div>
+        <p class="help">Off by default, and the most revealing thing here. One row per hit with
+        browser, OS, device and referrer — on a quiet site that is a readable trace of what a
+        single person browsed, in public.</p></div>
       </div>
       <div class="field">
         <label for="recent_log_limit">Recent visitors rows</label>
