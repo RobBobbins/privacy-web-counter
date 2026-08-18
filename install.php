@@ -300,6 +300,10 @@ a{color:var(--accent)}
   addresses stored. Source on <a href="https://github.com/RobBobbins/privacy-web-counter">GitHub</a>.</p>
   <p class="sub">This writes <code>config.php</code> and <code>data/salt.php</code> for you,
   then deletes itself. Nothing is tracked until you finish this.</p>
+  <p class="sub">This page handles configuration only. After it runs you still need to add one
+  line to each page you want counted, and paste a handler rule into your web root's
+  <code>.htaccess</code> so <code>.html</code> files run PHP. Both steps are explained after
+  setup finishes.</p>
 
   <?php if ($writeError): ?>
     <div class="errors">
@@ -341,13 +345,18 @@ a{color:var(--accent)}
       <div class="field">
         <label for="own_hosts">Your own hostnames</label>
         <input type="text" id="own_hosts" name="own_hosts" value="<?= h($ownHosts) ?>" placeholder="example.com, www.example.com">
-        <p class="help">Comma-separated. Visits from these hosts count as internal navigation, not referrers.</p>
+        <p class="help">Comma-separated. Put your actual domain here —
+        <code>yourdomain.com</code> and <code>www.yourdomain.com</code>. Without this, every
+        click between your own pages shows up as a referrer instead of internal navigation.</p>
       </div>
       <div class="field">
         <label for="salt">Visitor-hash salt</label>
         <input type="text" id="salt" name="salt" value="<?= h($salt) ?>">
-        <p class="help">Auto-generated — leave as is. Saved to <code>data/salt.php</code>, never to
-        <code>config.php</code>. Set once; changing it later resets unique-visitor counting.</p>
+        <p class="help">Auto-generated — leave as is. This is the secret behind every visitor
+        hash in the database. The stored hashes are only irreversible while this string stays
+        secret: anyone who obtains it can turn every hash back into an IP address. Saved to
+        <code>data/salt.php</code> (blocked from the web), never to <code>config.php</code>.
+        Set once; changing it resets unique-visitor counting.</p>
       </div>
     </div>
 
@@ -388,6 +397,11 @@ a{color:var(--accent)}
 
     <div class="section">
       <h2>Dashboard display</h2>
+      <p class="help" style="margin-bottom:1rem">Your dashboard has no password — anyone who
+      finds the folder can read your traffic numbers. It carries <code>noindex</code> so search
+      engines skip it, but that is a request, not a lock. If that concerns you, put it behind
+      HTTP basic auth via <code>.htaccess</code> after setup, or choose an unguessable folder
+      name.</p>
       <div class="check">
         <input type="checkbox" id="count_dashboard" name="count_dashboard" value="1"<?= $countDashboard ? ' checked' : '' ?>>
         <div><label for="count_dashboard">Count visits to the dashboard itself</label>
