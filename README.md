@@ -38,6 +38,8 @@ it off in setup if you'd rather not.
 - Nine date ranges: last 12 hours, today, yesterday, 7/30/90/365 days, all time
 - A light/dark theme toggle — remembers your choice, otherwise follows your system setting
 
+![Privacy Web Counter dashboard](privacy-web-counter-screenshot2-8.png)
+
 ## Pick a folder name
 
 This package can live at any path on your site. Nothing is hardcoded to a specific
