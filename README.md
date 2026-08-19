@@ -21,6 +21,10 @@ your browser's `Referer` header would otherwise lose — see
 [Referrer recovery](#referrer-recovery--campaign-tracking) for exactly what it does, and
 how to turn it off for a tracker with zero JavaScript.
 
+The dashboard has no login. Anyone who finds the URL can read your traffic numbers.
+Pick an unguessable folder name, or put it behind HTTP basic auth — see
+[Known tradeoffs](#known-tradeoffs-of-this-approach).
+
 Free to use under the [MIT license](LICENSE). The dashboard shows a small "LISTEN TO:
 PGNIP.ca comedy podcast" credit by default — you're welcome to leave it, and free to turn
 it off in setup if you'd rather not.
