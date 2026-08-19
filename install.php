@@ -283,12 +283,13 @@ a{color:var(--accent)}
         If hits still aren't recording, ask your host which owner PHP runs as rather
         than setting <code>777</code>, which on shared hosting grants write access to
         every other account on the server.</li>
+      <li>Make sure your pages are <code>.php</code> files, not <code>.html</code>.
+        Rename them if needed — <code>.php</code> files already run PHP, no extra
+        handler directives required. See the README for redirect rules that keep
+        old <code>.html</code> URLs working.</li>
       <li>Add this line to the very top of every page you want counted — before
         <code>&lt;!doctype html&gt;</code>, nothing in front of it, not even a space:
         <br><code>&lt;?php require_once $_SERVER['DOCUMENT_ROOT'] . '/YOUR-FOLDER-NAME/counter.php'; ?&gt;</code></li>
-      <li>If your host serves <code>.html</code> files as plain files instead of
-        running PHP in them, add the handler line from
-        <code>root-htaccess-SNIPPET.txt</code> to your site's root <code>.htaccess</code>.</li>
       <li>Visit a counted page, then open <a href="index.php">index.php</a> for your dashboard.</li>
     </ol>
   </div>
@@ -300,10 +301,9 @@ a{color:var(--accent)}
   addresses stored. Source on <a href="https://github.com/RobBobbins/privacy-web-counter">GitHub</a>.</p>
   <p class="sub">This writes <code>config.php</code> and <code>data/salt.php</code> for you,
   then deletes itself. Nothing is tracked until you finish this.</p>
-  <p class="sub">This page handles configuration only. After it runs you still need to add one
-  line to each page you want counted, and paste a handler rule into your web root's
-  <code>.htaccess</code> so <code>.html</code> files run PHP. Both steps are explained after
-  setup finishes.</p>
+  <p class="sub">This page handles configuration only. After it runs you still need to make sure
+  your pages are <code>.php</code> files and add one line to each page you want counted.
+  Both steps are explained after setup finishes.</p>
 
   <?php if ($writeError): ?>
     <div class="errors">

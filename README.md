@@ -36,10 +36,14 @@ it off in setup if you'd rather not.
 
 ## Pick a folder name
 
-This package can live at any path on your site — `counter`, `stats`, `analytics`,
-`tools/traffic`, whatever you like. Nothing here is hardcoded to a specific name: every
-file finds its own folder automatically, and the dashboard excludes its own pages from
-being counted based on wherever you actually put it.
+This package can live at any path on your site. Nothing is hardcoded to a specific
+name: every file finds its own folder automatically, and the dashboard excludes its
+own pages from being counted based on wherever you actually put it.
+
+Avoid predictable names like `counter`, `stats`, `analytics` or `traffic` — bots
+scan for those. The dashboard has no password, so an obvious folder name means
+automated scanners find your traffic numbers. Pick something that only you would
+guess.
 
 The **one place** the folder name has to be typed is the include line you add to your
 pages (step 3 below) — because that's how PHP finds the file in the first place. Rename
@@ -50,19 +54,26 @@ whatever you actually chose.
 
 ## Files
 
-| Local file | Goes on the host at |
+Upload these to `/public_html/YOUR-FOLDER-NAME/` (or your web root equivalent):
+
+| File | What it does |
 |---|---|
-| `config.php` | `/public_html/YOUR-FOLDER-NAME/config.php` |
-| *(`config.example.php` is a fallback template — see below)* | |
-| `.htaccess` | `/public_html/YOUR-FOLDER-NAME/.htaccess` |
-| `lib.php` | `/public_html/YOUR-FOLDER-NAME/lib.php` |
-| `counter.php` | `/public_html/YOUR-FOLDER-NAME/counter.php` |
-| `referrer.php` | `/public_html/YOUR-FOLDER-NAME/referrer.php` |
-| `install.php` | `/public_html/YOUR-FOLDER-NAME/install.php` *(deletes itself after setup)* |
-| `index.php` | `/public_html/YOUR-FOLDER-NAME/index.php` |
-| `live.php` | `/public_html/YOUR-FOLDER-NAME/live.php` |
-| `data/.htaccess` | `/public_html/YOUR-FOLDER-NAME/data/.htaccess` |
-| `root-htaccess-SNIPPET.txt` | paste its contents into `/public_html/.htaccess` |
+| `config.php` | Your settings. Written by `install.php`, or copy from `config.example.php`. |
+| `.htaccess` | Blocks web access to `config.php`. |
+| `lib.php` | Shared functions used by every other file. |
+| `counter.php` | The tracker. Included by your pages via `require_once`. |
+| `referrer.php` | Receives the referrer-recovery beacon. |
+| `install.php` | Setup wizard. Deletes itself after first run. |
+| `index.php` | The dashboard. |
+| `live.php` | JSON endpoint the dashboard polls for live updates. |
+| `data/.htaccess` | Blocks web access to the database and salt. |
+
+Only needed for the [alternative method](#alternative-keep-pages-as-html) (`.html` pages):
+
+| File | What it does |
+|---|---|
+| `root-htaccess-SNIPPET.txt` | Handler directives to paste into your web root's `.htaccess`. |
+| `verify/phpcheck/` | Seven test folders to find which handler line works on your host. |
 
 `stats.db` is created automatically on the first counted page view. Do not upload one.
 
@@ -105,11 +116,22 @@ that's yours, drop `YOUR-FOLDER-NAME` straight into the FTP root instead.
    `config.php`, create `data/salt.php` yourself as described in
    [Where the salt lives](#where-the-salt-lives), and delete `install.php` over FTP.
 
-4. **Edit the `.htaccess` in your web root.** Open `root-htaccess-SNIPPET.txt`, copy
-   the contents, and **append** it to your web root's `.htaccess` (not the one in
-   `data/`). Do not overwrite that file — it probably has redirects and rewrite rules
-   already. Keep a backup copy of it first. Not sure which handler line your host
-   needs? See [Checking it worked](#checking-it-worked) below.
+4. **Make sure your pages are `.php` files.** Pages must be `.php` so the
+   `require_once` line in the next step actually runs. If your pages are currently
+   `.html`, rename them (`index.html` → `index.php`). To keep old `.html` URLs
+   working, add these redirects to your web root's `.htaccess`:
+
+   ```apache
+   RewriteEngine On
+   RewriteCond %{REQUEST_FILENAME} !-f
+   RewriteRule ^(.+)\.html$ /$1.php [R=301,L]
+   ```
+
+   Already using `.php` pages? Skip to step 5.
+
+   Can't rename your pages? See the
+   [alternative method](#alternative-keep-pages-as-html) below — it makes `.html`
+   files run PHP without renaming them, at the cost of a more involved setup.
 
 5. **Add one line to the top of every page you want counted.** It must be the very
    first thing in the file, before `<!doctype html>`, with nothing — not even a
@@ -124,13 +146,8 @@ that's yours, drop `YOUR-FOLDER-NAME` straight into the FTP root instead.
 ## Checking it worked
 
 - If pages render normally and the dashboard shows a view, you're done.
-- If your browser **downloads** the `.html` file instead of showing it, or you see
-  the raw `<?php ... ?>` text on the page, the `.htaccess` handler line is wrong for
-  your host. Upload the `verify/phpcheck/` folder from this repo — it has seven
-  pre-built test folders (`t1` through `t7`), one per handler spelling in
-  `root-htaccess-SNIPPET.txt`. Open each one; whichever says "WORKS" tells you which
-  line to uncomment. `verify/phptest.html` is a second, single-file check once you
-  think you've got the right one.
+- If you see the raw `<?php ... ?>` text on the page, the file is not being processed
+  as PHP. Make sure the file extension is `.php`, not `.html`.
 - If pages render but the dashboard says "No data yet", the `data` folder isn't
   writable. Go back to step 2.
 
@@ -220,13 +237,6 @@ included.
 
 ## Known tradeoffs of this approach
 
-- **Every `.html` page now goes through the PHP interpreter.** Slightly slower
-  than serving a static file, and some hosts stop applying browser-cache headers
-  to PHP-handled files. On a small site the difference is not noticeable.
-- **Any page containing a literal `<?` sequence may break.** The most common
-  culprit is an XML declaration, `<?xml version="1.0"?>`, inside an inline SVG.
-  PHP will try to interpret it. Search your pages for `<?xml` before switching
-  the handler on; SVGs work fine without that declaration, so delete it if found.
 - **You must edit every page you want counted.** Pages without the include line
   are invisible to the counter.
 - **If `js_beacon` is on, every counted page makes one small extra request** via
@@ -254,18 +264,37 @@ included.
   will appear in your referrers list. It is cosmetic, and short of putting the dashboard
   behind a login there is no way to fully prevent it.
 
-## If `.html` parsing won't work on your host
+## Alternative: keep pages as `.html`
 
-Rename the pages to `.php` instead (`index.html` → `index.php`) and add these
-redirects to your web root's `.htaccess` so old links keep working:
+If you cannot rename your pages to `.php` — thousands of existing URLs, a CMS that
+forces `.html`, or another reason — you can make Apache run `.html` files through
+PHP instead. This avoids renaming but widens the attack surface: every `.html` file
+on the entire site becomes executable PHP, not just the ones with the `require_once`
+line.
 
-```apache
-RewriteEngine On
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule ^(.+)\.html$ /$1.php [R=301,L]
-```
+1. Open `root-htaccess-SNIPPET.txt` from this repo.
+2. Copy its contents and **append** them to your web root's `.htaccess` (not the one
+   in `data/`). Do not overwrite the file — it probably has rules already. Back it up
+   first.
+3. Exactly one handler line in the snippet should be uncommented. Option 1 works on
+   most hosts. If your pages break or download instead of rendering, comment it out
+   and try the next one.
+4. Not sure which line your host needs? Upload the `verify/phpcheck/` folder — it has
+   seven test folders (`t1` through `t7`), one per handler spelling. Open each one;
+   whichever says "WORKS" is the right line.
 
-No handler directive is needed in that case — `.php` files already run PHP.
+With this in place, skip step 4 of the main install (your pages stay `.html`) and go
+straight to step 5.
+
+Two extra tradeoffs with this approach:
+
+- **Every `.html` page goes through the PHP interpreter**, not just the counted ones.
+  Slightly slower than serving a static file, and some hosts stop applying
+  browser-cache headers to PHP-handled files.
+- **Any `.html` page containing a literal `<?` sequence may break.** The most common
+  culprit is `<?xml version="1.0"?>` inside an inline SVG. PHP tries to interpret
+  it. Search your pages for `<?xml` before enabling the handler; SVGs work fine
+  without that declaration.
 
 ## Privacy design
 
